@@ -1912,22 +1912,7 @@ class SkylightCalendarCard extends HTMLElement {
       <div class="week-compact-container">
         ${weekDays.map(date => {
           const isToday = date.toDateString() === today.toDateString();
-          let events = this.getEventsForDay(date);
-          
-          // Sort events: all-day first, then by start time
-          events = events.sort((a, b) => {
-            const aIsAllDay = a.start.date || !a.start.includes?.('T');
-            const bIsAllDay = b.start.date || !b.start.includes?.('T');
-            
-            // All-day events come first
-            if (aIsAllDay && !bIsAllDay) return -1;
-            if (!aIsAllDay && bIsAllDay) return 1;
-            
-            // Both same type, sort by time
-            const aTime = new Date(a.start.dateTime || a.start.date || a.start);
-            const bTime = new Date(b.start.dateTime || b.start.date || b.start);
-            return aTime - bTime;
-          });
+          const events = this.sortEventsForDate(this.getEventsForDay(date), date);
           
           return `
             <div class="week-day-column ${isToday ? 'today' : ''}" data-date="${date.toISOString()}" data-click-target="day-header">
@@ -1937,22 +1922,16 @@ class SkylightCalendarCard extends HTMLElement {
               </div>
               <div class="week-day-events">
                 ${events.map(event => {
-                  let startTime, isAllDay;
-                  
-                  if (event.start.dateTime) {
-                    startTime = new Date(event.start.dateTime);
-                    isAllDay = false;
-                  } else if (event.start.date) {
-                    startTime = new Date(event.start.date);
-                    isAllDay = true;
-                  } else {
-                    startTime = new Date(event.start);
-                    isAllDay = !event.start.includes('T');
-                  }
+                  const daySegment = this.getEventDaySegment(event, date);
+                  if (!daySegment) return '';
+                  const { segmentStart, segmentEnd, isAllDaySegment } = daySegment;
+                  const timeLabel = isAllDaySegment
+                    ? this.t('allDay')
+                    : `${this.formatTime(segmentStart)} - ${this.formatTime(segmentEnd)}`;
                   
                   return `
                     <div class="week-compact-event" style="background: ${event.color}" data-event='${JSON.stringify(event).replace(/'/g, "&#39;")}'>
-                      ${!isAllDay ? `<div class="week-compact-event-time">${this.formatTime(startTime)}</div>` : `<div class="week-compact-event-time">${this.t('allDay')}</div>`}
+                      <div class="week-compact-event-time">${timeLabel}</div>
                       <div class="week-compact-event-title">${this.escapeHtml(event.summary || this.t('untitledEvent'))}</div>
                     </div>
                   `;
@@ -1993,9 +1972,8 @@ class SkylightCalendarCard extends HTMLElement {
       const dayEvents = this.getEventsForDay(date);
       const allDayCount = dayEvents.filter(event => {
         if (this._hiddenCalendars.has(event.entityId)) return false;
-        if (event.start.date) return true;
-        if (event.start.dateTime) return false;
-        return !event.start.includes('T');
+        const daySegment = this.getEventDaySegment(event, date);
+        return daySegment ? daySegment.isAllDaySegment : false;
       }).length;
       maxAllDayEvents = Math.max(maxAllDayEvents, allDayCount);
     });
@@ -2031,7 +2009,7 @@ class SkylightCalendarCard extends HTMLElement {
                 <div class="week-standard-day-name">${dayNames[date.getDay()]}</div>
                 <div class="week-standard-day-date">${date.getDate()}</div>
               </div>
-              ${hasAllDayEvents ? this.renderAllDayEventsForDay(dayEvents, allDayHeight) : ''}
+              ${hasAllDayEvents ? this.renderAllDayEventsForDay(dayEvents, date, allDayHeight) : ''}
               <div class="day-time-slots">
                 ${hours.map(hour => `
                   <div class="day-time-slot" style="height: ${hourHeight}px;" data-hour="${hour}"></div>
@@ -2071,23 +2049,14 @@ class SkylightCalendarCard extends HTMLElement {
     `;
   }
 
-  renderAllDayEventsForDay(events, allDayHeight) {
+  renderAllDayEventsForDay(events, date, allDayHeight) {
     const allDayEvents = events.filter(event => {
       if (this._hiddenCalendars.has(event.entityId)) {
         return false;
       }
-      
-      let isAllDay = false;
-      
-      if (event.start.date) {
-        isAllDay = true;
-      } else if (event.start.dateTime) {
-        isAllDay = false;
-      } else {
-        isAllDay = !event.start.includes('T');
-      }
-      
-      return isAllDay;
+
+      const daySegment = this.getEventDaySegment(event, date);
+      return daySegment ? daySegment.isAllDaySegment : false;
     });
     
     return `
@@ -2107,55 +2076,35 @@ class SkylightCalendarCard extends HTMLElement {
   }
 
   renderTimedEventsForDay(events, date, startHour, endHour, hourHeight) {
-    const timedEvents = events.filter(event => {
+    const timedEvents = events.map(event => {
       if (this._hiddenCalendars.has(event.entityId)) {
-        return false;
+        return null;
       }
-      
-      let isAllDay = false;
-      let eventStart;
-      
-      if (event.start.dateTime) {
-        eventStart = new Date(event.start.dateTime);
-        isAllDay = false;
-      } else if (event.start.date) {
-        return false; // Skip all-day events
-      } else {
-        eventStart = new Date(event.start);
-        isAllDay = !event.start.includes('T');
+      const daySegment = this.getEventDaySegment(event, date);
+      if (!daySegment || daySegment.isAllDaySegment) {
+        return null;
       }
-      
-      if (isAllDay) return false;
-      
-      const eventHour = eventStart.getHours();
-      return eventHour >= startHour && eventHour <= endHour;
-    });
+      return { event, daySegment };
+    }).filter(Boolean);
     
     // Process timed events for overlaps
-    const eventBlocks = timedEvents.map(event => {
-      let eventStart, eventEnd;
-      
-      if (event.start.dateTime) {
-        eventStart = new Date(event.start.dateTime);
-        eventEnd = new Date(event.end.dateTime);
-      } else {
-        eventStart = new Date(event.start);
-        eventEnd = new Date(event.end);
-      }
-      
-      const startHourFloat = eventStart.getHours() + eventStart.getMinutes() / 60;
-      const endHourFloat = eventEnd.getHours() + eventEnd.getMinutes() / 60;
+    const eventBlocks = timedEvents.map(({ event, daySegment }) => {
+      const { segmentStart, segmentEnd } = daySegment;
+      const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+      const startHourFloat = (segmentStart.getTime() - dayStart.getTime()) / 3600000;
+      const endHourFloat = (segmentEnd.getTime() - dayStart.getTime()) / 3600000;
       
       return {
         event,
-        eventStart,
-        eventEnd,
+        eventStart: segmentStart,
+        eventEnd: segmentEnd,
         startHourFloat,
         endHourFloat,
-        startMinutes: eventStart.getHours() * 60 + eventStart.getMinutes(),
-        endMinutes: eventEnd.getHours() * 60 + eventEnd.getMinutes()
+        startMinutes: Math.round(startHourFloat * 60),
+        endMinutes: Math.round(endHourFloat * 60)
       };
-    });
+    }).filter(block => block.endHourFloat > startHour && block.startHourFloat < (endHour + 1));
     
     // Sort by start time, then by duration (longer first)
     eventBlocks.sort((a, b) => {
@@ -2220,9 +2169,15 @@ class SkylightCalendarCard extends HTMLElement {
     // Render timed events
     return eventBlocks.map(block => {
       const { event, eventStart, eventEnd, startHourFloat, endHourFloat, column } = block;
+
+      const clampedStartHour = Math.max(startHourFloat, startHour);
+      const clampedEndHour = Math.min(endHourFloat, endHour + 1);
+      if (clampedEndHour <= clampedStartHour) {
+        return '';
+      }
       
-      const duration = endHourFloat - startHourFloat;
-      const top = (startHourFloat - startHour) * hourHeight;
+      const duration = clampedEndHour - clampedStartHour;
+      const top = (clampedStartHour - startHour) * hourHeight;
       const height = duration * hourHeight;
       
       const clusterColumns = block.clusterColumns || 1;
@@ -2357,20 +2312,7 @@ class SkylightCalendarCard extends HTMLElement {
     const isToday = date.toDateString() === today.toDateString();
     let dayEvents = this.getEventsForDay(date);
     
-    // Sort events: all-day first, then by start time
-    dayEvents = dayEvents.sort((a, b) => {
-      const aIsAllDay = a.start.date || !a.start.includes?.('T');
-      const bIsAllDay = b.start.date || !b.start.includes?.('T');
-      
-      // All-day events come first
-      if (aIsAllDay && !bIsAllDay) return -1;
-      if (!aIsAllDay && bIsAllDay) return 1;
-      
-      // Both same type, sort by time
-      const aTime = new Date(a.start.dateTime || a.start.date || a.start);
-      const bTime = new Date(b.start.dateTime || b.start.date || b.start);
-      return aTime - bTime;
-    });
+    dayEvents = this.sortEventsForDate(dayEvents, date);
     
     const maxVisible = 3;
     
@@ -2381,73 +2323,104 @@ class SkylightCalendarCard extends HTMLElement {
     return `
       <div class="${classes}" data-date="${date.toISOString()}">
         <div class="day-number">${dayNum}</div>
-        ${dayEvents.slice(0, maxVisible).map(event => this.renderEvent(event)).join('')}
+        ${dayEvents.slice(0, maxVisible).map(event => this.renderEvent(event, date)).join('')}
         ${dayEvents.length > maxVisible ? `<div class="more-events">${this.t('moreEvents', { count: dayEvents.length - maxVisible })}</div>` : ''}
       </div>
     `;
   }
 
-  renderEvent(event) {
-    let startTime;
-    let isAllDay = false;
-    
-    if (event.start.dateTime) {
-      startTime = new Date(event.start.dateTime);
-    } else if (event.start.date) {
-      startTime = new Date(event.start.date);
-      isAllDay = true;
-    } else {
-      startTime = new Date(event.start);
-      isAllDay = !event.start.includes('T');
-    }
+  renderEvent(event, date) {
+    const daySegment = this.getEventDaySegment(event, date);
+    if (!daySegment) return '';
+    const { segmentStart, isAllDaySegment } = daySegment;
     
     return `
       <div class="event" style="background: ${event.color}" data-event='${JSON.stringify(event).replace(/'/g, "&#39;")}'>
-        ${!isAllDay ? `<span class="event-time">${this.formatTime(startTime)}</span>` : ''}
+        ${!isAllDaySegment ? `<span class="event-time">${this.formatTime(segmentStart)}</span>` : ''}
         ${this.escapeHtml(event.summary || this.t('untitledEvent'))}
       </div>
     `;
   }
 
+  getEventDateTimeInfo(event) {
+    if (event.start.dateTime) {
+      return {
+        eventStart: new Date(event.start.dateTime),
+        eventEnd: new Date(event.end.dateTime),
+        isAllDay: false
+      };
+    }
+
+    if (event.start.date) {
+      return {
+        eventStart: new Date(event.start.date + 'T00:00:00'),
+        eventEnd: new Date(event.end.date + 'T00:00:00'),
+        isAllDay: true
+      };
+    }
+
+    const isAllDay = !event.start.includes('T');
+    return {
+      eventStart: new Date(event.start),
+      eventEnd: new Date(event.end),
+      isAllDay
+    };
+  }
+
+  getEventDaySegment(event, date) {
+    const { eventStart, eventEnd, isAllDay } = this.getEventDateTimeInfo(event);
+
+    const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const nextDayStart = new Date(dayStart);
+    nextDayStart.setDate(nextDayStart.getDate() + 1);
+
+    if (eventEnd <= dayStart || eventStart >= nextDayStart) {
+      return null;
+    }
+
+    const segmentStart = new Date(Math.max(eventStart.getTime(), dayStart.getTime()));
+    const segmentEnd = new Date(Math.min(eventEnd.getTime(), nextDayStart.getTime()));
+    const isAllDaySegment = isAllDay || (
+      segmentStart.getTime() === dayStart.getTime() &&
+      segmentEnd.getTime() === nextDayStart.getTime()
+    );
+
+    return {
+      eventStart,
+      eventEnd,
+      segmentStart,
+      segmentEnd,
+      isAllDay,
+      isAllDaySegment,
+      startsOnDay: eventStart >= dayStart && eventStart < nextDayStart,
+      endsOnDay: eventEnd > dayStart && eventEnd <= nextDayStart
+    };
+  }
+
+  sortEventsForDate(events, date) {
+    return [...events].sort((a, b) => {
+      const aSegment = this.getEventDaySegment(a, date);
+      const bSegment = this.getEventDaySegment(b, date);
+
+      if (!aSegment && !bSegment) return 0;
+      if (!aSegment) return 1;
+      if (!bSegment) return -1;
+
+      if (aSegment.isAllDaySegment && !bSegment.isAllDaySegment) return -1;
+      if (!aSegment.isAllDaySegment && bSegment.isAllDaySegment) return 1;
+
+      return aSegment.segmentStart - bSegment.segmentStart;
+    });
+  }
+
   getEventsForDay(date) {
-    const dateStr = date.toDateString();
     return this._events.filter(event => {
       // Filter out events from hidden calendars
       if (this._hiddenCalendars.has(event.entityId)) {
         return false;
       }
       
-      // Handle both ISO format and HA's datetime format
-      let eventStart, eventEnd, isAllDay;
-      
-      if (event.start.dateTime) {
-        // Google Calendar format
-        eventStart = new Date(event.start.dateTime);
-        eventEnd = new Date(event.end.dateTime);
-        isAllDay = false;
-      } else if (event.start.date) {
-        // All-day event format
-        eventStart = new Date(event.start.date + 'T00:00:00');
-        eventEnd = new Date(event.end.date + 'T00:00:00');
-        isAllDay = true;
-      } else {
-        // Direct ISO string format
-        eventStart = new Date(event.start);
-        eventEnd = new Date(event.end);
-        isAllDay = !event.start.includes('T');
-      }
-      
-      // Check if the date falls within the event range
-      const eventStartDate = new Date(eventStart.getFullYear(), eventStart.getMonth(), eventStart.getDate());
-      const eventEndDate = new Date(eventEnd.getFullYear(), eventEnd.getMonth(), eventEnd.getDate());
-      const checkDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-      
-      // For all-day events, end date is exclusive (event ends at start of end date)
-      if (isAllDay) {
-        return checkDate >= eventStartDate && checkDate < eventEndDate;
-      }
-      
-      return checkDate >= eventStartDate && checkDate <= eventEndDate;
+      return this.getEventDaySegment(event, date) !== null;
     });
   }
 
@@ -3588,20 +3561,7 @@ class SkylightCalendarCard extends HTMLElement {
     const modal = this.shadowRoot.getElementById('event-modal');
     const content = this.shadowRoot.getElementById('modal-content');
     
-    // Sort events: all-day first, then by start time (same as calendar view)
-    const sortedEvents = events.sort((a, b) => {
-      const aIsAllDay = a.start.date || !a.start.includes?.('T');
-      const bIsAllDay = b.start.date || !b.start.includes?.('T');
-      
-      // All-day events come first
-      if (aIsAllDay && !bIsAllDay) return -1;
-      if (!aIsAllDay && bIsAllDay) return 1;
-      
-      // Both same type, sort by time
-      const aTime = new Date(a.start.dateTime || a.start.date || a.start);
-      const bTime = new Date(b.start.dateTime || b.start.date || b.start);
-      return aTime - bTime;
-    });
+    const sortedEvents = this.sortEventsForDate(events, date);
     
     content.innerHTML = `
       <div class="modal-header">
@@ -3610,28 +3570,16 @@ class SkylightCalendarCard extends HTMLElement {
       </div>
       <div class="modal-body">
         ${sortedEvents.map(event => {
-          // Parse event times properly
-          let startTime, endTime, isAllDay;
-          
-          if (event.start.dateTime) {
-            startTime = new Date(event.start.dateTime);
-            endTime = new Date(event.end.dateTime);
-            isAllDay = false;
-          } else if (event.start.date) {
-            startTime = new Date(event.start.date + 'T00:00:00');
-            endTime = new Date(event.end.date + 'T00:00:00');
-            isAllDay = true;
-          } else {
-            startTime = new Date(event.start);
-            endTime = new Date(event.end);
-            isAllDay = !event.start.includes('T');
-          }
-          
+          const daySegment = this.getEventDaySegment(event, date);
+          if (!daySegment) return '';
+
+          const { segmentStart, segmentEnd, isAllDaySegment } = daySegment;
+
           return `
             <div style="margin-bottom: 16px; padding: 12px; background: ${event.color}15; border-left: 4px solid ${event.color}; border-radius: 4px; cursor: pointer;" class="day-event" data-event='${JSON.stringify(event).replace(/'/g, "&#39;")}'>
               <div style="font-weight: 600; margin-bottom: 4px;">${this.escapeHtml(event.summary || this.t('untitledEvent'))}</div>
               <div style="font-size: 13px; color: #6b7280;">
-                ${isAllDay ? this.t('allDay') : `${this.formatTime(startTime)} - ${this.formatTime(endTime)}`}
+                ${isAllDaySegment ? this.t('allDay') : `${this.formatTime(segmentStart)} - ${this.formatTime(segmentEnd)}`}
               </div>
               ${event.location ? `<div style="font-size: 13px; color: #6b7280; margin-top: 4px;">📍 ${this.escapeHtml(event.location)}</div>` : ''}
             </div>
