@@ -1183,6 +1183,7 @@ class SkylightCalendarCard extends HTMLElement {
       
       .week-standard-container {
         display: flex;
+        align-items: flex-start;
         background: #f9fafb;
         overflow-x: auto;
         padding: 16px;
