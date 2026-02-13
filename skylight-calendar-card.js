@@ -21,6 +21,20 @@ const TRANSLATIONS = {
       eventTitle: 'Event Title',
       eventTitlePlaceholder: 'Team Meeting',
       allDayEvent: 'All-day event',
+      recurring: 'Recurring',
+      recurringEventOptions: 'Recurring options',
+      recurrenceFrequency: 'Repeat',
+      recurrenceEvery: 'Every',
+      recurrenceIntervalSuffix: 'interval(s)',
+      recurrenceEndsOn: 'Ends on',
+      recurrenceCount: 'Occurrences (COUNT)',
+      recurrenceWeekdays: 'Weekdays',
+      recurrenceNoEndDate: 'No end date (optional)',
+      recurrenceDaily: 'Daily',
+      recurrenceWeekly: 'Weekly',
+      recurrenceMonthly: 'Monthly',
+      recurrenceYearly: 'Yearly',
+      recurrenceSelectWeekday: 'Select at least one weekday for weekly recurring events',
       start: 'Start',
       end: 'End',
       startDate: 'Start Date',
@@ -97,6 +111,20 @@ const TRANSLATIONS = {
       eventTitle: "Titre de l'événement",
       eventTitlePlaceholder: "Réunion d'équipe",
       allDayEvent: 'Événement sur toute la journée',
+      recurring: 'Récurrent',
+      recurringEventOptions: 'Options de récurrence',
+      recurrenceFrequency: 'Répéter',
+      recurrenceEvery: 'Chaque',
+      recurrenceIntervalSuffix: 'intervalle(s)',
+      recurrenceEndsOn: 'Se termine le',
+      recurrenceCount: 'Occurrences (COUNT)',
+      recurrenceWeekdays: 'Jours de la semaine',
+      recurrenceNoEndDate: 'Pas de date de fin (optionnel)',
+      recurrenceDaily: 'Quotidien',
+      recurrenceWeekly: 'Hebdomadaire',
+      recurrenceMonthly: 'Mensuel',
+      recurrenceYearly: 'Annuel',
+      recurrenceSelectWeekday: 'Sélectionnez au moins un jour pour les événements hebdomadaires',
       start: 'Début',
       end: 'Fin',
       startDate: 'Date de début',
@@ -173,6 +201,20 @@ const TRANSLATIONS = {
       eventTitle: 'Terminname',
       eventTitlePlaceholder: 'Team-Meeting',
       allDayEvent: 'Ganztägiges Ereignis',
+      recurring: 'Wiederkehrend',
+      recurringEventOptions: 'Wiederholungsoptionen',
+      recurrenceFrequency: 'Wiederholen',
+      recurrenceEvery: 'Alle',
+      recurrenceIntervalSuffix: 'Intervall(e)',
+      recurrenceEndsOn: 'Endet am',
+      recurrenceCount: 'Anzahl (COUNT)',
+      recurrenceWeekdays: 'Wochentage',
+      recurrenceNoEndDate: 'Kein Enddatum (optional)',
+      recurrenceDaily: 'Täglich',
+      recurrenceWeekly: 'Wöchentlich',
+      recurrenceMonthly: 'Monatlich',
+      recurrenceYearly: 'Jährlich',
+      recurrenceSelectWeekday: 'Wählen Sie mindestens einen Wochentag für wöchentliche Termine aus',
       start: 'Beginn',
       end: 'Ende',
       startDate: 'Startdatum',
@@ -2642,7 +2684,46 @@ class SkylightCalendarCard extends HTMLElement {
     });
   }
 
+  getRecurrenceWeekdayOptions() {
+    return [
+      { key: 'MO', label: 'Mon' },
+      { key: 'TU', label: 'Tue' },
+      { key: 'WE', label: 'Wed' },
+      { key: 'TH', label: 'Thu' },
+      { key: 'FR', label: 'Fri' },
+      { key: 'SA', label: 'Sat' },
+      { key: 'SU', label: 'Sun' }
+    ];
+  }
+
+  buildRRuleFromInputs({ frequency, interval, untilDate, count, byDay }) {
+    const parts = [`FREQ=${frequency}`];
+    const parsedInterval = parseInt(interval, 10);
+
+    if (!Number.isNaN(parsedInterval) && parsedInterval > 1) {
+      parts.push(`INTERVAL=${parsedInterval}`);
+    }
+
+    if (Array.isArray(byDay) && byDay.length > 0) {
+      parts.push(`BYDAY=${byDay.join(',')}`);
+    }
+
+    const parsedCount = parseInt(count, 10);
+    if (!Number.isNaN(parsedCount) && parsedCount > 0) {
+      parts.push(`COUNT=${parsedCount}`);
+    } else if (untilDate) {
+      const until = new Date(`${untilDate}T23:59:59`);
+      if (!Number.isNaN(until.getTime())) {
+        const compactUntil = until.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+        parts.push(`UNTIL=${compactUntil}`);
+      }
+    }
+
+    return parts.join(';');
+  }
+
   showCreateEventModal(defaultDate = null, defaultTime = null) {
+
     const modal = this.shadowRoot.getElementById('event-modal');
     const content = this.shadowRoot.getElementById('modal-content');
     
@@ -2727,6 +2808,50 @@ class SkylightCalendarCard extends HTMLElement {
               <label class="form-checkbox-label" for="event-all-day">${this.t('allDayEvent')}</label>
             </div>
           </div>
+
+          <div class="form-group">
+            <div class="form-checkbox-group">
+              <input type="checkbox" class="form-checkbox" id="event-recurring" />
+              <label class="form-checkbox-label" for="event-recurring">${this.t('recurring')}</label>
+            </div>
+          </div>
+
+          <div id="recurring-event-fields" style="display: none;">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">${this.t('recurrenceFrequency')}</label>
+                <select class="form-select" id="event-recurrence-frequency">
+                  <option value="DAILY">${this.t('recurrenceDaily')}</option>
+                  <option value="WEEKLY">${this.t('recurrenceWeekly')}</option>
+                  <option value="MONTHLY">${this.t('recurrenceMonthly')}</option>
+                  <option value="YEARLY">${this.t('recurrenceYearly')}</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">${this.t('recurrenceEvery')}</label>
+                <input type="number" class="form-input" id="event-recurrence-interval" min="1" value="1" />
+              </div>
+            </div>
+            <div class="form-group" id="event-recurrence-weekdays-group" style="display: none;">
+              <label class="form-label">${this.t('recurrenceWeekdays')}</label>
+              <div class="form-checkbox-group" style="flex-wrap: wrap; gap: 10px;">
+                ${this.getRecurrenceWeekdayOptions().map(day => `
+                  <label class="form-checkbox-label" style="display:flex;align-items:center;gap:6px;">
+                    <input type="checkbox" class="form-checkbox event-recurrence-weekday" value="${day.key}" />
+                    <span>${day.label}</span>
+                  </label>
+                `).join('')}
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">${this.t('recurrenceEndsOn')}</label>
+              <input type="date" class="form-input" id="event-recurrence-until" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">${this.t('recurrenceCount')}</label>
+              <input type="number" class="form-input" id="event-recurrence-count" min="1" placeholder="10" />
+            </div>
+          </div>
           
           <div id="timed-event-fields">
             <div class="form-row">
@@ -2785,8 +2910,12 @@ class SkylightCalendarCard extends HTMLElement {
     // Event listeners
     const form = this.shadowRoot.getElementById('create-event-form');
     const allDayCheckbox = this.shadowRoot.getElementById('event-all-day');
+    const recurringCheckbox = this.shadowRoot.getElementById('event-recurring');
+    const recurrenceFrequency = this.shadowRoot.getElementById('event-recurrence-frequency');
     const timedFields = this.shadowRoot.getElementById('timed-event-fields');
     const allDayFields = this.shadowRoot.getElementById('all-day-event-fields');
+    const recurringFields = this.shadowRoot.getElementById('recurring-event-fields');
+    const recurrenceWeekdaysGroup = this.shadowRoot.getElementById('event-recurrence-weekdays-group');
     const errorDiv = this.shadowRoot.getElementById('form-error');
     
     // Toggle all-day fields
@@ -2799,6 +2928,17 @@ class SkylightCalendarCard extends HTMLElement {
         allDayFields.style.display = 'none';
       }
     });
+
+    const updateRecurringFrequencyVisibility = () => {
+      recurrenceWeekdaysGroup.style.display = recurrenceFrequency.value === 'WEEKLY' ? 'block' : 'none';
+    };
+
+    recurringCheckbox.addEventListener('change', () => {
+      recurringFields.style.display = recurringCheckbox.checked ? 'block' : 'none';
+    });
+
+    recurrenceFrequency.addEventListener('change', updateRecurringFrequencyVisibility);
+    updateRecurringFrequencyVisibility();
     
     // Close button
     this.shadowRoot.getElementById('close-modal').addEventListener('click', () => {
@@ -2876,6 +3016,27 @@ class SkylightCalendarCard extends HTMLElement {
         
         eventData.start = { dateTime: start.toISOString() };
         eventData.end = { dateTime: end.toISOString() };
+      }
+
+      if (recurringCheckbox.checked) {
+        const frequency = this.shadowRoot.getElementById('event-recurrence-frequency').value;
+        const interval = this.shadowRoot.getElementById('event-recurrence-interval').value;
+        const untilDate = this.shadowRoot.getElementById('event-recurrence-until').value;
+        const recurrenceCount = this.shadowRoot.getElementById('event-recurrence-count').value;
+        const byDay = Array.from(this.shadowRoot.querySelectorAll('.event-recurrence-weekday:checked')).map((el) => el.value);
+
+        if (frequency === 'WEEKLY' && byDay.length === 0) {
+          this.showFormError(errorDiv, this.t('recurrenceSelectWeekday'));
+          return;
+        }
+
+        eventData.rrule = this.buildRRuleFromInputs({
+          frequency,
+          interval,
+          untilDate,
+          count: recurrenceCount,
+          byDay: frequency === 'WEEKLY' ? byDay : []
+        });
       }
       
       // Disable submit button
@@ -3297,36 +3458,74 @@ class SkylightCalendarCard extends HTMLElement {
     if (!this._hass) {
       throw new Error(this.t('homeAssistantUnavailable'));
     }
-    
-    // Build service data based on event type
-    const serviceData = {
+
+    const isRecurring = !!eventData.rrule;
+
+    // Build service-style data (used by both API variants)
+    const baseData = {
       entity_id: calendarId,
       summary: eventData.summary
     };
-    
-    // Add location if provided
+
     if (eventData.location) {
-      serviceData.location = eventData.location;
+      baseData.location = eventData.location;
     }
-    
-    // Add description if provided
+
     if (eventData.description) {
-      serviceData.description = eventData.description;
+      baseData.description = eventData.description;
     }
-    
-    // Add date/time fields
+
     if (eventData.start.date) {
-      // All-day event
-      serviceData.start_date = eventData.start.date;
-      serviceData.end_date = eventData.end.date;
+      baseData.start_date = eventData.start.date;
+      baseData.end_date = eventData.end.date;
     } else {
-      // Timed event
-      serviceData.start_date_time = eventData.start.dateTime;
-      serviceData.end_date_time = eventData.end.dateTime;
+      baseData.start_date_time = eventData.start.dateTime;
+      baseData.end_date_time = eventData.end.dateTime;
     }
-    
+
+    if (isRecurring) {
+      baseData.rrule = eventData.rrule;
+
+      const dtstart = baseData.start_date_time || baseData.start_date;
+      const dtend = baseData.end_date_time || baseData.end_date;
+
+      // HA recurring event support is exposed through Calendar WebSocket API.
+      // Primary payload shape expects event.dtstart / event.dtend.
+      const wsPayloadCandidates = [
+        {
+          type: 'calendar/event/create',
+          entity_id: calendarId,
+          event: {
+            summary: baseData.summary,
+            location: baseData.location,
+            description: baseData.description,
+            rrule: baseData.rrule,
+            dtstart,
+            dtend
+          }
+        },
+        { type: 'calendar/event/create', ...baseData }
+      ];
+
+      let lastWsError = null;
+      for (const payload of wsPayloadCandidates) {
+        try {
+          if (this._hass.connection?.sendMessagePromise) {
+            await this._hass.connection.sendMessagePromise(payload);
+            return;
+          }
+        } catch (error) {
+          lastWsError = error;
+        }
+      }
+
+      console.error('WebSocket recurring create failed:', lastWsError);
+      throw new Error(lastWsError?.message || this.t('createEventServiceError'));
+    }
+
+    // Non-recurring events continue to use the traditional service call.
     try {
-      await this._hass.callService('calendar', 'create_event', serviceData);
+      await this._hass.callService('calendar', 'create_event', baseData);
     } catch (error) {
       console.error('Service call failed:', error);
       throw new Error(error.message || this.t('createEventServiceError'));
