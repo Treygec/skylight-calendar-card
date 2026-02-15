@@ -1049,12 +1049,34 @@ class SkylightCalendarCard extends HTMLElement {
         background: rgba(255, 255, 255, 0.3);
         border-color: rgba(255, 255, 255, 0.6);
       }
+
+      .compact-add-event-button {
+        background: rgba(255, 255, 255, 0.2);
+        border: none;
+        color: white;
+        padding: 8px 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+        transition: background 0.2s;
+      }
+
+      .compact-add-event-button:hover {
+        background: rgba(255, 255, 255, 0.3);
+        border-color: rgba(255, 255, 255, 0.6);
+        transform: none;
+      }
+
+      .compact-add-event-button .icon {
+        font-size: 14px;
+      }
       
       .month-year {
         font-size: 18px;
         font-weight: 500;
         color: white;
-        min-width: 180px;
+        min-width: 140px;
         text-align: center;
       }
       
@@ -1439,9 +1461,9 @@ class SkylightCalendarCard extends HTMLElement {
         left: 8px;
         right: 8px;
         color: white;
-        padding: 6px 8px;
+        padding: 4px 8px;
         border-radius: 8px;
-        font-size: 12px;
+        font-size: 11px;
         overflow: hidden;
         cursor: pointer;
         transition: transform 0.2s, box-shadow 0.2s;
@@ -2225,7 +2247,7 @@ class SkylightCalendarCard extends HTMLElement {
         <div class="compact-header-left">
           <h2 class="header-title">${this._config.title}</h2>
           ${this.renderCalendarBadgesInline()}
-          ${canAddEvents ? `<button class="add-event-button" id="add-event-btn"><span class="icon">+</span>${this.t('addEvent')}</button>` : ''}
+          ${canAddEvents ? `<button class="compact-add-event-button" id="add-event-btn"><span class="icon">+</span>${this.t('addEvent')}</button>` : ''}
         </div>
         <div class="header-controls">
           ${this.renderThemeToggle()}
@@ -2295,27 +2317,31 @@ class SkylightCalendarCard extends HTMLElement {
         weekEnd.setDate(weekStart.getDate() + (totalWeeks * 7) - 1);
         
         if (weekStart.getMonth() === weekEnd.getMonth() && weekStart.getFullYear() === weekEnd.getFullYear()) {
-          return `${this.getMonthName(weekStart.getMonth())} ${weekStart.getDate()}-${weekEnd.getDate()}, ${weekStart.getFullYear()}`;
+          return `${this.getMonthNameShort(weekStart.getMonth())} ${weekStart.getDate()}-${weekEnd.getDate()}, ${weekStart.getFullYear()}`;
         } else if (weekStart.getFullYear() === weekEnd.getFullYear()) {
-          return `${this.getMonthName(weekStart.getMonth())} ${weekStart.getDate()} - ${this.getMonthName(weekEnd.getMonth())} ${weekEnd.getDate()}, ${weekStart.getFullYear()}`;
+          return `${this.getMonthNameShort(weekStart.getMonth())} ${weekStart.getDate()} - ${this.getMonthNameShort(weekEnd.getMonth())} ${weekEnd.getDate()}, ${weekStart.getFullYear()}`;
         } else {
-          return `${this.getMonthName(weekStart.getMonth())} ${weekStart.getDate()}, ${weekStart.getFullYear()} - ${this.getMonthName(weekEnd.getMonth())} ${weekEnd.getDate()}, ${weekEnd.getFullYear()}`;
+          return `${this.getMonthNameShort(weekStart.getMonth())} ${weekStart.getDate()}, ${weekStart.getFullYear()} - ${this.getMonthNameShort(weekEnd.getMonth())} ${weekEnd.getDate()}, ${weekEnd.getFullYear()}`;
         }
       }
       
       // Standard month view
       const month = this._currentDate.getMonth();
       const year = this._currentDate.getFullYear();
-      return `${this.getMonthName(month)} ${year}`;
+      return `${this.getMonthNameShort(month)} ${year}`;
     } else {
       const weekDays = this.getWeekDays();
       if (weekDays.length === 0) return '';
       const start = weekDays[0];
       const end = weekDays[weekDays.length - 1];
       if (start.getMonth() === end.getMonth()) {
-        return `${this.getMonthName(start.getMonth())} ${start.getDate()}-${end.getDate()}, ${start.getFullYear()}`;
+        if (start.getDate() === end.getDate()) {
+          return `${this.getMonthNameShort(start.getMonth())} ${start.getDate()}, ${start.getFullYear()}`;
+        } else {
+          return `${this.getMonthNameShort(start.getMonth())} ${start.getDate()}-${end.getDate()}, ${start.getFullYear()}`;
+        }
       } else {
-        return `${this.getMonthName(start.getMonth())} ${start.getDate()} - ${this.getMonthName(end.getMonth())} ${end.getDate()}, ${start.getFullYear()}`;
+        return `${this.getMonthNameShort(start.getMonth())} ${start.getDate()} - ${this.getMonthNameShort(end.getMonth())} ${end.getDate()}, ${start.getFullYear()}`;
       }
     }
   }
@@ -4629,6 +4655,11 @@ class SkylightCalendarCard extends HTMLElement {
 
   getMonthName(month) {
     const formatter = new Intl.DateTimeFormat(this.getLocale(), { month: 'long' });
+    return formatter.format(new Date(2020, month, 1));
+  }
+  
+  getMonthNameShort(month) {
+    const formatter = new Intl.DateTimeFormat(this.getLocale(), { month: 'short' });
     return formatter.format(new Date(2020, month, 1));
   }
 
