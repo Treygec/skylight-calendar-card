@@ -354,6 +354,13 @@ class SkylightCalendarCard extends HTMLElement {
     this._activeLanguage = DEFAULT_LANGUAGE;
     this._hasCustomTitle = false;
     this._isDarkMode = false;
+    this._weekStandardFixedOffsetHeight = null;
+    this._weekStandardContainerTopInViewport = null;
+    this._handleViewportResize = () => {
+      if (this._config.compact_height && this._viewMode === 'week-standard') {
+        this.render();
+      }
+    };
   }
 
   setConfig(config) {
@@ -726,7 +733,68 @@ class SkylightCalendarCard extends HTMLElement {
   }
 
   connectedCallback() {
+    window.addEventListener('resize', this._handleViewportResize);
+    window.visualViewport?.addEventListener('resize', this._handleViewportResize);
     this.render();
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener('resize', this._handleViewportResize);
+    window.visualViewport?.removeEventListener('resize', this._handleViewportResize);
+  }
+
+  getCompactMaxHeight() {
+    if (!this._config.compact_height) return null;
+
+    const viewportHeight = window.visualViewport?.height || window.innerHeight;
+    const containerTop = Math.max(
+      this._weekStandardContainerTopInViewport ?? this.getBoundingClientRect().top,
+      0
+    );
+    const bottomSpacing = 24;
+    const minimumHeight = 180;
+
+    return Math.max(minimumHeight, Math.floor(viewportHeight - containerTop - bottomSpacing));
+  }
+
+  getCompactContainerStyle(maxHeight = null) {
+    if (!this._config.compact_height) return '';
+
+    const resolvedMaxHeight = maxHeight || this.getCompactMaxHeight();
+    if (!resolvedMaxHeight) return '';
+
+    return `max-height: ${resolvedMaxHeight}px; overflow-y: auto;`;
+  }
+
+  updateWeekStandardFixedOffsetHeightFromDom() {
+    if (this._viewMode !== 'week-standard' || !this._config.compact_height || !this.shadowRoot) return;
+
+    const container = this.shadowRoot.querySelector('.week-standard-container');
+    const headerSpacer = this.shadowRoot.querySelector('.time-column-header-spacer');
+    const extraSpacer = this.shadowRoot.querySelector('.time-column-extra-spacer');
+    const allDaySpacer = this.shadowRoot.querySelector('.time-column-allday-spacer');
+    if (!container || !headerSpacer || !extraSpacer) return;
+
+    const computed = window.getComputedStyle(container);
+    const containerPadding = (parseFloat(computed.paddingTop) || 0) + (parseFloat(computed.paddingBottom) || 0);
+    const measuredOffset = Math.ceil(
+      containerPadding +
+      headerSpacer.getBoundingClientRect().height +
+      extraSpacer.getBoundingClientRect().height +
+      (allDaySpacer ? allDaySpacer.getBoundingClientRect().height : 0)
+    );
+    const measuredContainerTop = Math.max(container.getBoundingClientRect().top, 0);
+
+    if (!Number.isFinite(measuredOffset) || !Number.isFinite(measuredContainerTop)) return;
+
+    const offsetChanged = this._weekStandardFixedOffsetHeight === null || Math.abs(this._weekStandardFixedOffsetHeight - measuredOffset) > 1;
+    const containerTopChanged = this._weekStandardContainerTopInViewport === null || Math.abs(this._weekStandardContainerTopInViewport - measuredContainerTop) > 1;
+
+    if (offsetChanged || containerTopChanged) {
+      this._weekStandardFixedOffsetHeight = measuredOffset;
+      this._weekStandardContainerTopInViewport = measuredContainerTop;
+      this.render();
+    }
   }
 
   getLanguage() {
@@ -2123,6 +2191,7 @@ class SkylightCalendarCard extends HTMLElement {
     `;
 
     this.attachEventListeners();
+    this.updateWeekStandardFixedOffsetHeightFromDom();
   }
 
   renderStandardHeader() {
@@ -2334,13 +2403,9 @@ class SkylightCalendarCard extends HTMLElement {
     }
     
     const baseHourHeight = 120;
-    const hourHeight = baseHourHeight * (this._config.height_scale || 1.0);
+    const preferredHourHeight = baseHourHeight * (this._config.height_scale || 1.0);
     
     const dayNames = this.getWeekdayNames('short');
-    
-    const containerStyle = this._config.compact_height 
-      ? 'max-height: calc(100vh - 200px); overflow-y: auto;' 
-      : '';
     
     // Calculate max all-day events across all days
     let maxAllDayEvents = 0;
@@ -2358,6 +2423,16 @@ class SkylightCalendarCard extends HTMLElement {
     const allDayHeight = hasAllDayEvents 
       ? 16 + (maxAllDayEvents * 24) + ((maxAllDayEvents - 1) * 4) + 2
       : 0;
+
+    const compactMaxHeight = this.getCompactMaxHeight();
+    const fallbackOffsetHeight = 127 + allDayHeight;
+    const staticOffsetHeight = this._weekStandardFixedOffsetHeight || fallbackOffsetHeight;
+    const availableSlotHeight = compactMaxHeight ? compactMaxHeight - staticOffsetHeight : null;
+    const compactHourHeight = availableSlotHeight && availableSlotHeight > 0 ? Math.floor(availableSlotHeight / hours.length) : null;
+    const hourHeight = compactHourHeight ? Math.max(20, Math.min(preferredHourHeight, compactHourHeight)) : preferredHourHeight;
+    const timelineHeight = hourHeight * hours.length;
+    const dayTimeSlotsStyle = `height: ${timelineHeight}px; min-height: ${timelineHeight}px;`;
+    const containerStyle = this.getCompactContainerStyle(compactMaxHeight);
 
     const showCurrentTimeBar = this._config.show_current_time_bar && this.shouldShowCurrentTimeBar(today, startHour, endHour);
     
@@ -2388,7 +2463,7 @@ class SkylightCalendarCard extends HTMLElement {
                 <div class="week-standard-day-date">${date.getDate()}</div>
               </div>
               ${hasAllDayEvents ? this.renderAllDayEventsForDay(dayEvents, date, allDayHeight) : ''}
-              <div class="day-time-slots">
+              <div class="day-time-slots" style="${dayTimeSlotsStyle}">
                 ${hours.map(hour => `
                   <div class="day-time-slot" style="height: ${hourHeight}px;" data-hour="${hour}"></div>
                 `).join('')}
