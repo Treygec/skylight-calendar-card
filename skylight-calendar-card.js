@@ -3148,10 +3148,8 @@ class SkylightCalendarCard extends HTMLElement {
     // Process timed events for overlaps
     const eventBlocks = timedEvents.map(({ event, daySegment }) => {
       const { segmentStart, segmentEnd } = daySegment;
-      const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-
-      const startHourFloat = (segmentStart.getTime() - dayStart.getTime()) / 3600000;
-      const endHourFloat = (segmentEnd.getTime() - dayStart.getTime()) / 3600000;
+      const startHourFloat = this.getLocalDayHourFloat(segmentStart, date);
+      const endHourFloat = this.getLocalDayHourFloat(segmentEnd, date);
       
       return {
         event,
@@ -3255,6 +3253,20 @@ class SkylightCalendarCard extends HTMLElement {
         </div>
       `;
     }).join('');
+  }
+
+  getLocalDayHourFloat(dateTime, referenceDate) {
+    // Use wall-clock hour values relative to the rendered day so DST transitions
+    // do not visually shift events by ±1 hour in the schedule grid.
+    const dayKey = Date.UTC(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
+    const timeKey = Date.UTC(dateTime.getFullYear(), dateTime.getMonth(), dateTime.getDate());
+    const dayDiff = (timeKey - dayKey) / 86400000;
+
+    return (dayDiff * 24) +
+      dateTime.getHours() +
+      (dateTime.getMinutes() / 60) +
+      (dateTime.getSeconds() / 3600) +
+      (dateTime.getMilliseconds() / 3600000);
   }
 
   getVisibleCalendarBadgesForEvent(event) {
