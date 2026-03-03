@@ -4503,6 +4503,14 @@ class SkylightCalendarCard extends HTMLElement {
       this.showError(this.t('noWritableCalendars'));
       return;
     }
+
+    const selectedEditTargets = Array.isArray(this._combinedEditTargets) && this._combinedEditTargets.length > 0
+      ? this._combinedEditTargets
+      : null;
+    const selectedCombinedCalendarIds = selectedEditTargets
+      ? Array.from(new Set(selectedEditTargets.map(target => target.entityId))).filter((entityId) => writableCalendars.includes(entityId))
+      : [];
+    const visibleCalendarOptions = selectedCombinedCalendarIds.length > 0 ? selectedCombinedCalendarIds : writableCalendars;
     
     // Format for datetime-local input
     const formatDateTimeLocal = (date) => {
@@ -4537,8 +4545,8 @@ class SkylightCalendarCard extends HTMLElement {
             <label class="form-label">
               ${this.t('calendar')}<span class="form-required">*</span>
             </label>
-            <select class="form-select" id="event-calendar" required>
-              ${writableCalendars.map((entityId) => `
+            <select class="form-select" id="event-calendar" required ${selectedCombinedCalendarIds.length > 1 ? 'disabled' : ''}>
+              ${visibleCalendarOptions.map((entityId) => `
                 <option value="${entityId}" ${entityId === event.entityId ? 'selected' : ''}>
                   ${this.escapeHtml(this.getCalendarName(entityId))}
                 </option>
