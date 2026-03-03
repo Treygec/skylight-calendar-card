@@ -4523,6 +4523,8 @@ class SkylightCalendarCard extends HTMLElement {
 
     const recurrenceData = this.parseRRule(event.rrule || '');
     const isRecurring = !!event.rrule;
+    const isSingleOccurrenceEdit = editScope === 'this' && isRecurring;
+    const recurringSelectedByDefault = isRecurring && !isSingleOccurrenceEdit;
     
     content.innerHTML = `
       <div class="modal-header">
@@ -4562,12 +4564,12 @@ class SkylightCalendarCard extends HTMLElement {
 
           <div class="form-group">
             <div class="form-checkbox-group">
-              <input type="checkbox" class="form-checkbox" id="event-recurring" ${isRecurring ? 'checked' : ''} />
+              <input type="checkbox" class="form-checkbox" id="event-recurring" ${recurringSelectedByDefault ? 'checked' : ''} />
               <label class="form-checkbox-label" for="event-recurring">${this.t('recurring')}</label>
             </div>
           </div>
 
-          <div id="recurring-event-fields" style="display: ${isRecurring ? 'block' : 'none'};">
+          <div id="recurring-event-fields" style="display: ${recurringSelectedByDefault ? 'block' : 'none'};">
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label">${this.t('recurrenceFrequency')}</label>
@@ -4583,7 +4585,7 @@ class SkylightCalendarCard extends HTMLElement {
                 <input type="number" class="form-input" id="event-recurrence-interval" min="1" value="${this.escapeHtml(recurrenceData.interval || '1')}" />
               </div>
             </div>
-            <div class="form-group" id="event-recurrence-weekdays-group" style="display: ${isRecurring && recurrenceData.frequency === 'WEEKLY' ? 'block' : 'none'};">
+            <div class="form-group" id="event-recurrence-weekdays-group" style="display: ${recurringSelectedByDefault && recurrenceData.frequency === 'WEEKLY' ? 'block' : 'none'};">
               <label class="form-label">${this.t('recurrenceWeekdays')}</label>
               <div class="form-checkbox-group" style="flex-wrap: wrap; gap: 10px;">
                 ${this.getRecurrenceWeekdayOptions().map(day => `
