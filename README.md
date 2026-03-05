@@ -1,3 +1,9 @@
+[![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/integration)
+[![GitHub release](https://img.shields.io/github/release/superdingo101/skylight-calendar-card.svg)](https://github.com/superdingo101/skylight-calendar-card/releases)
+[![GitHub stars](https://img.shields.io/github/stars/superdingo101/skylight-calendar-card.svg)](https://github.com/superdingo101/skylight-calendar-card/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/superdingo101/skylight-calendar-card.svg)](https://github.com/superdingo101/skylight-calendar-card/issues)
+[![License](https://img.shields.io/github/license/superdingo101/skylight-calendar-card.svg)](LICENSE)
+
 # Skylight Calendar Card for Home Assistant
 
 A custom Lovelace calendar card inspired by the Skylight Calendar style.
