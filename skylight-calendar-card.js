@@ -23,6 +23,7 @@ const TRANSLATIONS = {
       eventTitlePlaceholder: 'Team Meeting',
       allDayEvent: 'All-day event',
       recurring: 'Recurring',
+      eventOptions: 'Event Options',
       recurringEventOptions: 'Recurring options',
       recurrenceFrequency: 'Repeat',
       recurrenceEvery: 'Every',
@@ -123,6 +124,7 @@ const TRANSLATIONS = {
       eventTitlePlaceholder: "Réunion d'équipe",
       allDayEvent: 'Événement sur toute la journée',
       recurring: 'Récurrent',
+      eventOptions: "Options de l'événement",
       recurringEventOptions: 'Options de récurrence',
       recurrenceFrequency: 'Répéter',
       recurrenceEvery: 'Chaque',
@@ -223,6 +225,7 @@ const TRANSLATIONS = {
       eventTitlePlaceholder: 'Team-Meeting',
       allDayEvent: 'Ganztägiges Ereignis',
       recurring: 'Wiederkehrend',
+      eventOptions: 'Terminoptionen',
       recurringEventOptions: 'Wiederholungsoptionen',
       recurrenceFrequency: 'Wiederholen',
       recurrenceEvery: 'Alle',
@@ -323,6 +326,7 @@ const TRANSLATIONS = {
       eventTitlePlaceholder: 'Groepsafspraak',
       allDayEvent: 'Hele dag',
       recurring: 'Terugkerend',
+      eventOptions: 'Afspraakopties',
       recurringEventOptions: 'terugkerend mogelijkheden',
       recurrenceFrequency: 'Herhaal',
       recurrenceEvery: 'Elke',
@@ -2398,8 +2402,16 @@ class SkylightCalendarCard extends HTMLElement {
         flex: 1;
       }
 
-      .form-group {
-        margin-bottom: 20px;
+      #create-event-form,
+      #edit-event-form {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+
+      .form-group,
+      .form-group-inline {
+        margin-bottom: 0;
       }
 
       .form-label {
@@ -2408,6 +2420,21 @@ class SkylightCalendarCard extends HTMLElement {
         font-weight: 600;
         color: #374151;
         margin-bottom: 8px;
+      }
+
+      .form-group-inline .form-label {
+        margin-bottom: 0;
+      }
+
+      .form-inline-row {
+        display: grid;
+        grid-template-columns: 120px minmax(0, 1fr);
+        gap: 12px;
+        align-items: center;
+      }
+
+      .form-inline-row.form-inline-row-top {
+        align-items: start;
       }
 
       .form-required {
@@ -2483,6 +2510,23 @@ class SkylightCalendarCard extends HTMLElement {
         gap: 8px;
       }
 
+      .form-checkbox-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 10px 14px;
+      }
+
+      .form-checkbox-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 18px;
+        margin-bottom: 0;
+      }
+
+      .form-checkbox-row .form-group {
+        margin-bottom: 0;
+      }
+
       .form-checkbox {
         width: 20px;
         height: 20px;
@@ -2545,7 +2589,7 @@ class SkylightCalendarCard extends HTMLElement {
         display: flex;
         gap: 12px;
         justify-content: flex-end;
-        margin-top: 24px;
+        margin-top: 6px;
       }
 
       .btn {
@@ -3047,6 +3091,16 @@ class SkylightCalendarCard extends HTMLElement {
 
         .form-row {
           grid-template-columns: 1fr;
+        }
+
+        .form-inline-row {
+          grid-template-columns: 88px minmax(0, 1fr);
+          gap: 8px;
+          align-items: center;
+        }
+
+        .form-group-inline .form-label {
+          margin-bottom: 0;
         }
       }
     `;
@@ -4820,60 +4874,75 @@ class SkylightCalendarCard extends HTMLElement {
       </div>
       <div class="modal-body">
         <form id="create-event-form">
-          <div class="form-group">
-            <label class="form-label">
-              ${this.t('calendars')}<span class="form-required">*</span>
-            </label>
-            <div class="form-checkbox-group" style="flex-direction: column; align-items: flex-start; gap: 10px;">
-              ${writableCalendars.map((entityId, index) => `
-                <label class="form-checkbox-group" style="margin: 0;">
-                  <input
-                    type="checkbox"
-                    class="form-checkbox create-event-calendar"
-                    value="${entityId}"
-                    ${index === 0 ? 'checked' : ''}
-                  />
-                  <span class="form-checkbox-label">${this.escapeHtml(this.getCalendarName(entityId))}</span>
-                </label>
-              `).join('')}
+          <div class="form-group form-group-inline">
+            <div class="form-inline-row">
+              <label class="form-label">
+                ${this.t('calendars')}<span class="form-required">*</span>
+              </label>
+              <div class="form-checkbox-grid">
+                ${writableCalendars.map((entityId, index) => `
+                  <label class="form-checkbox-group" style="margin: 0;">
+                    <input
+                      type="checkbox"
+                      class="form-checkbox create-event-calendar"
+                      value="${entityId}"
+                      ${index === 0 ? 'checked' : ''}
+                    />
+                    <span class="form-checkbox-label">${this.escapeHtml(this.getCalendarName(entityId))}</span>
+                  </label>
+                `).join('')}
+              </div>
             </div>
           </div>
 
-          <div class="form-group">
-            <label class="form-label">
-              ${this.t('eventTitle')}<span class="form-required">*</span>
-            </label>
-            <input type="text" class="form-input" id="event-title" placeholder="${this.t('eventTitlePlaceholder')}" required />
-          </div>
-
-          <div class="form-group">
-            <div class="form-checkbox-group">
-              <input type="checkbox" class="form-checkbox" id="event-all-day" />
-              <label class="form-checkbox-label" for="event-all-day">${this.t('allDayEvent')}</label>
+          <div class="form-group form-group-inline">
+            <div class="form-inline-row">
+              <label class="form-label">
+                ${this.t('eventTitle')}<span class="form-required">*</span>
+              </label>
+              <input type="text" class="form-input" id="event-title" placeholder="${this.t('eventTitlePlaceholder')}" required />
             </div>
           </div>
 
-          <div class="form-group">
-            <div class="form-checkbox-group">
-              <input type="checkbox" class="form-checkbox" id="event-recurring" />
-              <label class="form-checkbox-label" for="event-recurring">${this.t('recurring')}</label>
+          <div class="form-group form-group-inline">
+            <div class="form-inline-row form-inline-row-top">
+              <label class="form-label">${this.t('eventOptions')}</label>
+              <div class="form-checkbox-row">
+                <div class="form-group">
+                  <div class="form-checkbox-group">
+                    <input type="checkbox" class="form-checkbox" id="event-all-day" />
+                    <label class="form-checkbox-label" for="event-all-day">${this.t('allDayEvent')}</label>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <div class="form-checkbox-group">
+                    <input type="checkbox" class="form-checkbox" id="event-recurring" />
+                    <label class="form-checkbox-label" for="event-recurring">${this.t('recurring')}</label>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
           <div id="recurring-event-fields" style="display: none;">
             <div class="form-row">
-              <div class="form-group">
-                <label class="form-label">${this.t('recurrenceFrequency')}</label>
-                <select class="form-select" id="event-recurrence-frequency">
+              <div class="form-group form-group-inline">
+                <div class="form-inline-row">
+                  <label class="form-label">${this.t('recurrenceFrequency')}</label>
+                  <select class="form-select" id="event-recurrence-frequency">
                   <option value="DAILY">${this.t('recurrenceDaily')}</option>
                   <option value="WEEKLY">${this.t('recurrenceWeekly')}</option>
                   <option value="MONTHLY">${this.t('recurrenceMonthly')}</option>
                   <option value="YEARLY">${this.t('recurrenceYearly')}</option>
-                </select>
+                  </select>
+                </div>
               </div>
-              <div class="form-group">
-                <label class="form-label">${this.t('recurrenceEvery')}</label>
-                <input type="number" class="form-input" id="event-recurrence-interval" min="1" value="1" />
+              <div class="form-group form-group-inline">
+                <div class="form-inline-row">
+                  <label class="form-label">${this.t('recurrenceEvery')}</label>
+                  <input type="number" class="form-input" id="event-recurrence-interval" min="1" value="1" />
+                </div>
               </div>
             </div>
             <div class="form-group" id="event-recurrence-weekdays-group" style="display: none;">
@@ -4917,14 +4986,18 @@ class SkylightCalendarCard extends HTMLElement {
           </div>
 
           <div id="timed-event-fields">
-            <div class="form-row">
-              <div class="form-group">
+            <div class="form-group form-group-inline">
+              <div class="form-inline-row">
                 <label class="form-label">${this.t('start')}</label>
                 <input type="datetime-local" class="form-input" id="event-start"
                        value="${formatDateTimeLocal(startTime)}" required />
               </div>
+            </div>
+          </div>
 
-              <div class="form-group">
+          <div id="timed-event-fields">
+            <div class="form-group form-group-inline">
+              <div class="form-inline-row">
                 <label class="form-label">${this.t('end')}</label>
                 <input type="datetime-local" class="form-input" id="event-end"
                        value="${formatDateTimeLocal(endTime)}" required />
@@ -4948,9 +5021,11 @@ class SkylightCalendarCard extends HTMLElement {
             </div>
           </div>
 
-          <div class="form-group">
-            <label class="form-label">${this.t('location')}</label>
-            <input type="text" class="form-input" id="event-location" placeholder="${this.t('locationPlaceholder')}" />
+          <div class="form-group form-group-inline">
+            <div class="form-inline-row">
+              <label class="form-label">${this.t('location')}</label>
+              <input type="text" class="form-input" id="event-location" placeholder="${this.t('locationPlaceholder')}" />
+            </div>
           </div>
 
           <div class="form-group">
@@ -5209,43 +5284,56 @@ class SkylightCalendarCard extends HTMLElement {
             </select>
           </div>
 
-          <div class="form-group">
-            <label class="form-label">
-              ${this.t('eventTitle')}<span class="form-required">*</span>
-            </label>
-            <input type="text" class="form-input" id="event-title"
-                   placeholder="${this.t('eventTitlePlaceholder')}"
-                   value="${this.escapeHtml(event.summary || '')}" required />
-          </div>
-
-          <div class="form-group">
-            <div class="form-checkbox-group">
-              <input type="checkbox" class="form-checkbox" id="event-all-day" ${isAllDay ? 'checked' : ''} />
-              <label class="form-checkbox-label" for="event-all-day">${this.t('allDayEvent')}</label>
+          <div class="form-group form-group-inline">
+            <div class="form-inline-row">
+              <label class="form-label">
+                ${this.t('eventTitle')}<span class="form-required">*</span>
+              </label>
+              <input type="text" class="form-input" id="event-title"
+                     placeholder="${this.t('eventTitlePlaceholder')}"
+                     value="${this.escapeHtml(event.summary || '')}" required />
             </div>
           </div>
 
-          <div class="form-group">
-            <div class="form-checkbox-group">
-              <input type="checkbox" class="form-checkbox" id="event-recurring" ${recurringSelectedByDefault ? 'checked' : ''} />
-              <label class="form-checkbox-label" for="event-recurring">${this.t('recurring')}</label>
+          <div class="form-group form-group-inline">
+            <div class="form-inline-row form-inline-row-top">
+              <label class="form-label">${this.t('eventOptions')}</label>
+              <div class="form-checkbox-row">
+                <div class="form-group">
+                  <div class="form-checkbox-group">
+                    <input type="checkbox" class="form-checkbox" id="event-all-day" ${isAllDay ? 'checked' : ''} />
+                    <label class="form-checkbox-label" for="event-all-day">${this.t('allDayEvent')}</label>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <div class="form-checkbox-group">
+                    <input type="checkbox" class="form-checkbox" id="event-recurring" ${recurringSelectedByDefault ? 'checked' : ''} />
+                    <label class="form-checkbox-label" for="event-recurring">${this.t('recurring')}</label>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
           <div id="recurring-event-fields" style="display: ${recurringSelectedByDefault ? 'block' : 'none'};">
             <div class="form-row">
-              <div class="form-group">
-                <label class="form-label">${this.t('recurrenceFrequency')}</label>
-                <select class="form-select" id="event-recurrence-frequency">
+              <div class="form-group form-group-inline">
+                <div class="form-inline-row">
+                  <label class="form-label">${this.t('recurrenceFrequency')}</label>
+                  <select class="form-select" id="event-recurrence-frequency">
                   <option value="DAILY" ${recurrenceData.frequency === 'DAILY' ? 'selected' : ''}>${this.t('recurrenceDaily')}</option>
                   <option value="WEEKLY" ${recurrenceData.frequency === 'WEEKLY' ? 'selected' : ''}>${this.t('recurrenceWeekly')}</option>
                   <option value="MONTHLY" ${recurrenceData.frequency === 'MONTHLY' ? 'selected' : ''}>${this.t('recurrenceMonthly')}</option>
                   <option value="YEARLY" ${recurrenceData.frequency === 'YEARLY' ? 'selected' : ''}>${this.t('recurrenceYearly')}</option>
                 </select>
+                </div>
               </div>
-              <div class="form-group">
-                <label class="form-label">${this.t('recurrenceEvery')}</label>
-                <input type="number" class="form-input" id="event-recurrence-interval" min="1" value="${this.escapeHtml(recurrenceData.interval || '1')}" />
+              <div class="form-group form-group-inline">
+                <div class="form-inline-row">
+                  <label class="form-label">${this.t('recurrenceEvery')}</label>
+                  <input type="number" class="form-input" id="event-recurrence-interval" min="1" value="${this.escapeHtml(recurrenceData.interval || '1')}" />
+                </div>
               </div>
             </div>
             <div class="form-group" id="event-recurrence-weekdays-group" style="display: ${recurringSelectedByDefault && recurrenceData.frequency === 'WEEKLY' ? 'block' : 'none'};">
@@ -5289,14 +5377,16 @@ class SkylightCalendarCard extends HTMLElement {
           </div>
 
           <div id="timed-event-fields" style="display: ${isAllDay ? 'none' : 'block'};">
-            <div class="form-row">
-              <div class="form-group">
+            <div class="form-group form-group-inline">
+              <div class="form-inline-row">
                 <label class="form-label">${this.t('start')}</label>
                 <input type="datetime-local" class="form-input" id="event-start"
                        value="${formatDateTimeLocal(startDate)}" required />
               </div>
+            </div>
 
-              <div class="form-group">
+            <div class="form-group form-group-inline">
+              <div class="form-inline-row">
                 <label class="form-label">${this.t('end')}</label>
                 <input type="datetime-local" class="form-input" id="event-end"
                        value="${formatDateTimeLocal(endDate)}" required />
@@ -5320,11 +5410,13 @@ class SkylightCalendarCard extends HTMLElement {
             </div>
           </div>
 
-          <div class="form-group">
-            <label class="form-label">${this.t('location')}</label>
-            <input type="text" class="form-input" id="event-location"
-                   placeholder="${this.t('locationPlaceholder')}"
-                   value="${this.escapeHtml(event.location || '')}" />
+          <div class="form-group form-group-inline">
+            <div class="form-inline-row">
+              <label class="form-label">${this.t('location')}</label>
+              <input type="text" class="form-input" id="event-location"
+                     placeholder="${this.t('locationPlaceholder')}"
+                     value="${this.escapeHtml(event.location || '')}" />
+            </div>
           </div>
 
           <div class="form-group">
