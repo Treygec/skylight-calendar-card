@@ -4445,9 +4445,14 @@ class SkylightCalendarCard extends HTMLElement {
     return this.getLocalDateKey(eventStart) !== this.getLocalDateKey(eventEnd);
   }
 
+  shouldRenderTimedEventAsAllDayInSchedule(eventStart, eventEnd) {
+    const durationMs = eventEnd.getTime() - eventStart.getTime();
+    return durationMs >= 86400000 && this.eventSpansMultipleLocalDates(eventStart, eventEnd);
+  }
+
   getScheduleVisualInfo(event) {
     const { eventStart, eventEnd, isAllDay } = this.getEventDateTimeInfo(event);
-    const rendersAsAllDay = isAllDay || this.eventSpansMultipleLocalDates(eventStart, eventEnd);
+    const rendersAsAllDay = isAllDay || this.shouldRenderTimedEventAsAllDayInSchedule(eventStart, eventEnd);
     const displayTitle = event.summary || this.t('untitledEvent');
     const shouldIncludeStartTime = !isAllDay && rendersAsAllDay && this.shouldShowEventTime(event);
 
