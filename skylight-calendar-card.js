@@ -4978,6 +4978,23 @@ class SkylightCalendarCard extends HTMLElement {
     endInput.addEventListener('change', recalculateDuration);
   }
 
+  resolveTimedEventRange(startValue, endValue, fallbackDurationMs = 60 * 60 * 1000) {
+    const start = this.parsePossiblyLocalDateTime(startValue);
+    if (!(start instanceof Date) || Number.isNaN(start.getTime())) {
+      return { start: null, end: null };
+    }
+
+    const parsedEnd = endValue ? this.parsePossiblyLocalDateTime(endValue) : null;
+    if (parsedEnd instanceof Date && !Number.isNaN(parsedEnd.getTime())) {
+      return { start, end: parsedEnd };
+    }
+
+    return {
+      start,
+      end: new Date(start.getTime() + fallbackDurationMs)
+    };
+  }
+
   showCreateEventModal(defaultDate = null, defaultTime = null) {
 
     const modal = this.shadowRoot.getElementById('event-modal');
@@ -5165,7 +5182,7 @@ class SkylightCalendarCard extends HTMLElement {
               <div class="form-inline-row">
                 <label class="form-label">${this.t('end')}</label>
                 <input type="datetime-local" class="form-input" id="event-end"
-                       value="${formatDateTimeLocal(endTime)}" required />
+                       value="${formatDateTimeLocal(endTime)}" />
               </div>
             </div>
           </div>
@@ -5319,14 +5336,12 @@ class SkylightCalendarCard extends HTMLElement {
         const startDateTime = this.shadowRoot.getElementById('event-start').value;
         const endDateTime = this.shadowRoot.getElementById('event-end').value;
 
-        if (!startDateTime || !endDateTime) {
+        if (!startDateTime) {
           this.showFormError(errorDiv, this.t('startEndTimesRequired'));
           return;
         }
 
-        // Convert to ISO format
-        const start = this.parsePossiblyLocalDateTime(startDateTime);
-        const end = this.parsePossiblyLocalDateTime(endDateTime);
+        const { start, end } = this.resolveTimedEventRange(startDateTime, endDateTime);
 
         if (end <= start) {
           this.showFormError(errorDiv, this.t('endTimeBeforeStart'));
@@ -5554,7 +5569,7 @@ class SkylightCalendarCard extends HTMLElement {
               <div class="form-inline-row">
                 <label class="form-label">${this.t('end')}</label>
                 <input type="datetime-local" class="form-input" id="event-end"
-                       value="${formatDateTimeLocal(endDate)}" required />
+                       value="${formatDateTimeLocal(endDate)}" />
               </div>
             </div>
           </div>
@@ -5703,15 +5718,14 @@ class SkylightCalendarCard extends HTMLElement {
       } else {
         const startDateTime = this.shadowRoot.getElementById('event-start').value;
         const endDateTime = this.shadowRoot.getElementById('event-end').value;
+        const existingDurationMs = Math.max(endDate.getTime() - startDate.getTime(), 60 * 1000);
 
-        if (!startDateTime || !endDateTime) {
+        if (!startDateTime) {
           this.showFormError(errorDiv, this.t('startEndTimesRequired'));
           return;
         }
 
-        // Convert to ISO format
-        const start = this.parsePossiblyLocalDateTime(startDateTime);
-        const end = this.parsePossiblyLocalDateTime(endDateTime);
+        const { start, end } = this.resolveTimedEventRange(startDateTime, endDateTime, existingDurationMs);
 
         if (end <= start) {
           this.showFormError(errorDiv, this.t('endTimeBeforeStart'));
@@ -6022,44 +6036,34 @@ class SkylightCalendarCard extends HTMLElement {
     if (isRecurring) {
       baseData.rrule = eventData.rrule;
 
-      const dtstart = baseData.start_date_time || baseData.start_date;
-      const dtend = baseData.end_date_time || baseData.end_date;
-
       // HA recurring event support is exposed through Calendar WebSocket API.
-      // Primary payload shape expects event.dtstart / event.dtend.
-      const wsPayloadCandidates = [
-        {
-          type: 'calendar/event/create',
-          entity_id: calendarId,
-          event: {
-            summary: baseData.summary,
-            location: baseData.location,
-            description: baseData.description,
-            rrule: baseData.rrule,
-            dtstart,
-            dtend
-          }
-        },
-        { type: 'calendar/event/create', ...baseData }
-      ];
-
-      let lastWsError = null;
-      for (const payload of wsPayloadCandidates) {
-        try {
-          if (this._hass.connection?.sendMessagePromise) {
-            await this._hass.connection.sendMessagePromise(payload);
-            return;
-          }
-        } catch (error) {
-          lastWsError = error;
+      // WebSocket schema expects event.dtstart / event.dtend (not start/end keys).
+      const wsPayload = {
+        type: 'calendar/event/create',
+        entity_id: calendarId,
+        event: {
+          summary: baseData.summary,
+          location: baseData.location,
+          description: baseData.description,
+          rrule: baseData.rrule,
+          dtstart: eventData.start.dateTime || eventData.start.date,
+          dtend: eventData.end.dateTime || eventData.end.date
         }
+      };
+
+      try {
+        if (this._hass.connection?.sendMessagePromise) {
+          await this._hass.connection.sendMessagePromise(wsPayload);
+          return;
+        }
+      } catch (error) {
+        console.error('WebSocket recurring create failed:', error);
+        throw new Error(error?.message || this.t('createEventServiceError'));
       }
 
-      console.error('WebSocket recurring create failed:', lastWsError);
-      throw new Error(lastWsError?.message || this.t('createEventServiceError'));
+      throw new Error(this.t('createEventServiceError'));
     }
 
-    // Non-recurring events continue to use the traditional service call.
     try {
       await this._hass.callService('calendar', 'create_event', baseData);
     } catch (error) {
