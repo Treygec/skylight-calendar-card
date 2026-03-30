@@ -753,6 +753,10 @@ class SkylightCalendarCard extends HTMLElement {
     const normalizedEventFontColors = this.normalizeColorMap(config.event_font_colors || {});
     const normalizedHeaderColor = this.normalizeSingleColor(config.header_color);
     const normalizedHeaderTextColor = this.normalizeSingleColor(config.header_text_color);
+    const hasConfiguredBackgroundOpacity = config.background_opacity !== undefined && config.background_opacity !== null && config.background_opacity !== '';
+    const normalizedBackgroundOpacity = hasConfiguredBackgroundOpacity
+      ? this.normalizeBackgroundOpacity(config.background_opacity, 0)
+      : (config.background_transparent ? 100 : 0);
 
     const configuredWeekStartHour = Number(config.week_start_hour);
     const normalizedWeekStartHour = Number.isFinite(configuredWeekStartHour)
@@ -799,7 +803,8 @@ class SkylightCalendarCard extends HTMLElement {
       use_24hr_schedule: config.use_24hr_schedule ?? false, // Use 24-hour time notation in schedule view
       header_color: normalizedHeaderColor !== undefined ? normalizedHeaderColor : 'var(--primary-color)', // Custom header background color/gradient
       header_text_color: normalizedHeaderTextColor, // Optional custom header text color (auto contrast by default)
-      background_transparent: config.background_transparent || false, // Make calendar surfaces transparent in every view
+      background_transparent: normalizedBackgroundOpacity >= 100, // Legacy alias for full transparency
+      background_opacity: normalizedBackgroundOpacity, // Background transparency percentage (0 = opaque, 100 = transparent)
       background_image_url: config.background_image_url || null, // Optional background image URL for the calendar
       background_image_size: config.background_image_size || 'cover', // CSS background-size for calendar image
       background_image_position: config.background_image_position || 'center', // CSS background-position for calendar image
@@ -816,7 +821,9 @@ class SkylightCalendarCard extends HTMLElement {
       preference_storage_key: config.preference_storage_key || null, // Optional key to isolate saved preferences per card
       ...config,
       default_view: normalizedDefaultView || 'month', // Re-apply normalization after spread for legacy values
-      color_scheme: this.normalizeDefaultDarkMode(config.color_scheme) // Re-apply normalization after spread for color scheme values
+      color_scheme: this.normalizeDefaultDarkMode(config.color_scheme), // Re-apply normalization after spread for color scheme values
+      background_opacity: normalizedBackgroundOpacity, // Re-apply normalization after spread for background opacity values
+      background_transparent: normalizedBackgroundOpacity >= 100 // Re-apply legacy alias after spread
     };
     this._viewMode = this._config.default_view;
     this.applyThemeMode(this._config.color_scheme);
@@ -1729,16 +1736,40 @@ class SkylightCalendarCard extends HTMLElement {
       }
 
       .calendar-container {
-        background: var(--calendar-background, #ffffff);
-        background-image: var(--calendar-background-image, none);
-        background-size: var(--calendar-background-size, cover);
-        background-position: var(--calendar-background-position, center);
-        background-repeat: var(--calendar-background-repeat, no-repeat);
+        position: relative;
         border-radius: 12px;
         overflow: hidden;
         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         width: 100%;
         color-scheme: light;
+      }
+
+      .calendar-container::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        background: var(--calendar-background, #ffffff);
+        opacity: var(--calendar-background-opacity, 1);
+        pointer-events: none;
+      }
+
+      .calendar-container::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        background-image: var(--calendar-background-image, none);
+        background-size: var(--calendar-background-size, cover);
+        background-position: var(--calendar-background-position, center);
+        background-repeat: var(--calendar-background-repeat, no-repeat);
+        opacity: var(--calendar-background-image-opacity, 0);
+        pointer-events: none;
+      }
+
+      .calendar-container > * {
+        position: relative;
+        z-index: 1;
       }
 
       .calendar-container,
@@ -3252,9 +3283,12 @@ class SkylightCalendarCard extends HTMLElement {
 
 
       .calendar-container.dark-mode {
-        background-color: var(--calendar-background, #2a2f36);
         color: #e8ecf1;
         color-scheme: dark;
+      }
+
+      .calendar-container.dark-mode::before {
+        background: var(--calendar-background, #2a2f36);
       }
 
       .calendar-container.dark-mode,
@@ -3587,10 +3621,11 @@ class SkylightCalendarCard extends HTMLElement {
     const backgroundImageStyle = safeBackgroundImageUrl
       ? `--calendar-background-image: url('${safeBackgroundImageUrl}'); --calendar-background-size: ${this._config.background_image_size}; --calendar-background-position: ${this._config.background_image_position}; --calendar-background-repeat: ${this._config.background_image_repeat};`
       : '';
-    const hasCustomBackground = !!(this._config.background_transparent || this._config.background_image_url);
-    const backgroundStyle = this._config.background_transparent
-      ? '--calendar-background: transparent;'
-      : '';
+    const normalizedBackgroundOpacity = this.normalizeBackgroundOpacity(this._config.background_opacity, this._config.background_transparent ? 100 : 0);
+    const backgroundAlpha = (100 - normalizedBackgroundOpacity) / 100;
+    const backgroundImageAlpha = safeBackgroundImageUrl ? (normalizedBackgroundOpacity / 100) : 0;
+    const hasCustomBackground = normalizedBackgroundOpacity > 0;
+    const backgroundStyle = `--calendar-background-opacity: ${backgroundAlpha}; --calendar-background-image-opacity: ${backgroundImageAlpha};`;
     const containerStyle = `${headerStyle} ${backgroundStyle} ${backgroundImageStyle}`.trim();
 
     this._root.innerHTML = `
@@ -7332,6 +7367,15 @@ class SkylightCalendarCard extends HTMLElement {
     return value;
   }
 
+  normalizeBackgroundOpacity(opacityValue, fallback = 0) {
+    const numericOpacity = Number(opacityValue);
+    if (!Number.isFinite(numericOpacity)) {
+      return fallback;
+    }
+
+    return Math.min(100, Math.max(0, numericOpacity));
+  }
+
   static getStubConfig() {
     return {
       title: 'Family Calendar',
@@ -7347,6 +7391,7 @@ class SkylightCalendarCard extends HTMLElement {
       show_current_time_bar: false,
       show_event_location: false,
       event_location_font_size: 9,
+      background_opacity: 0,
       event_calendar_friendly_name: false,
       combine_style: 'bars',
       combine_background: 'primary',
@@ -7404,6 +7449,15 @@ class SkylightCalendarCardEditor extends HTMLElement {
     }
 
     return null;
+  }
+
+  normalizeBackgroundOpacity(opacityValue, fallback = 0) {
+    const numericOpacity = Number(opacityValue);
+    if (!Number.isFinite(numericOpacity)) {
+      return fallback;
+    }
+
+    return Math.min(100, Math.max(0, numericOpacity));
   }
 
   syncCombineBackgroundEditorState(backgroundValue) {
@@ -7529,7 +7583,8 @@ class SkylightCalendarCardEditor extends HTMLElement {
       event_location_font_size: 9,
       combine_calendars_width: 18,
       max_events: 0,
-      first_day_of_week: 0
+      first_day_of_week: 0,
+      background_opacity: 0
     };
     return Object.prototype.hasOwnProperty.call(defaults, key) ? defaults[key] : 0;
   }
@@ -7956,7 +8011,7 @@ class SkylightCalendarCardEditor extends HTMLElement {
       ${this.renderSubSection('Calendar display names', `<div class="map-grid">${this.renderMapRowInputs('calendar_names', { label: 'calendar names', placeholder: 'Display name' })}</div>`)}
       ${this.renderSubSection('Calendar badge icons', `<div class="map-grid">${this.renderMapRowInputs('calendar_badge_icons', { label: 'badge icons', placeholder: 'mdi:icon or URL' })}</div>`)}
       <div class="boolean-list">
-        <label><input type="checkbox" data-field="background_transparent" ${this._config.background_transparent ? 'checked' : ''}> Transparent background surfaces</label>
+        <label><input type="checkbox" data-field="background_transparent" ${this.normalizeBackgroundOpacity(this._config.background_opacity, this._config.background_transparent ? 100 : 0) >= 100 ? 'checked' : ''}> Transparent background surfaces</label>
         <label><input type="checkbox" data-field="hide_dark_mode_toggle" ${this._config.hide_dark_mode_toggle ? 'checked' : ''}> Hide dark mode toggle</label>
       </div>
       <div class="field">
@@ -7970,6 +8025,10 @@ class SkylightCalendarCardEditor extends HTMLElement {
     `);
 
     const backgroundSection = this.renderSection('Background image', `
+      <div class="field field-inline">
+        <label for="background_opacity">Background opacity</label>
+        <input id="background_opacity" data-field="background_opacity" data-type="number" type="number" min="0" max="100" step="1" value="${Number(this.normalizeBackgroundOpacity(this._config.background_opacity, this._config.background_transparent ? 100 : 0))}">
+      </div>
       <div class="field field-inline">
         <label for="background_image_url">Background image URL</label>
         <input id="background_image_url" data-field="background_image_url" type="text" value="${this._config.background_image_url || ''}" placeholder="https://... or /media/local/...">
@@ -8810,6 +8869,9 @@ class SkylightCalendarCardEditor extends HTMLElement {
       nextConfig.week_days = selectedWeekdays;
     } else if (event.target.type === 'checkbox') {
       nextConfig[field] = event.target.checked;
+      if (field === 'background_transparent') {
+        nextConfig.background_opacity = event.target.checked ? 100 : 0;
+      }
       if (field === 'compact_height' || field === 'combine_calendars') {
         this._config = nextConfig;
         this.render();
@@ -8831,11 +8893,17 @@ class SkylightCalendarCardEditor extends HTMLElement {
     } else if (event.target.dataset.type === 'number') {
       if (event.target.value === '') {
         nextConfig[field] = this.getEditorDefaultValue(field);
+        if (field === 'background_opacity') {
+          nextConfig.background_transparent = false;
+        }
       } else {
         const numericValue = Number(event.target.value);
         const parsedValue = Number.isFinite(numericValue) ? numericValue : this.getEditorDefaultValue(field);
         if (field === 'week_start_hour' || field === 'week_end_hour') {
           nextConfig[field] = Math.min(23, Math.max(0, parsedValue));
+        } else if (field === 'background_opacity') {
+          nextConfig.background_opacity = this.normalizeBackgroundOpacity(parsedValue, 0);
+          nextConfig.background_transparent = nextConfig.background_opacity >= 100;
         } else {
           nextConfig[field] = parsedValue;
         }
