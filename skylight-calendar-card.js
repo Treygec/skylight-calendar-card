@@ -1923,6 +1923,11 @@ class SkylightCalendarCard extends HTMLElement {
         outline: none;
       }
 
+      .view-mode-select option {
+        color: #111827;
+        background: #ffffff;
+      }
+
       .nav-button {
         background: var(--header-control-bg, rgba(255, 255, 255, 0.2));
         border: none;
@@ -3430,6 +3435,11 @@ class SkylightCalendarCard extends HTMLElement {
 
       .calendar-container.dark-mode .view-mode-select {
         color: #f8fafc;
+      }
+
+      .calendar-container.dark-mode .view-mode-select option {
+        color: #f8fafc;
+        background: #1f2937;
       }
 
       .calendar-container.dark-mode .week-day-header,
