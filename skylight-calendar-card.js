@@ -3480,6 +3480,10 @@ class SkylightCalendarCard extends HTMLElement {
       .calendar-container.custom-background .day-time-slot,
       .calendar-container.custom-background .time-slot,
       .calendar-container.custom-background .time-slot-label,
+      .calendar-container.custom-background .week-day-name,
+      .calendar-container.custom-background .week-day-date,
+      .calendar-container.custom-background .week-standard-day-name,
+      .calendar-container.custom-background .week-standard-day-date,
       .calendar-container.custom-background .empty-state {
         background: transparent !important;
       }
