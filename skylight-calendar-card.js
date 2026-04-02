@@ -4528,7 +4528,11 @@ class SkylightCalendarCard extends HTMLElement {
     }
 
     const commonStreetEndingPattern = /\b(street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|drive|dr\.?|lane|ln\.?|court|ct\.?|circle|cir\.?|place|pl\.?|parkway|pkwy\.?|way|terrace|ter\.?|highway|hwy\.?)\b/i;
-    const endingMatch = normalizedLocation.match(commonStreetEndingPattern);
+    const firstSegmentEnd = normalizedLocation.search(/[,;]/);
+    const streetSegment = firstSegmentEnd >= 0
+      ? normalizedLocation.slice(0, firstSegmentEnd)
+      : normalizedLocation;
+    const endingMatch = streetSegment.match(commonStreetEndingPattern);
     if (!endingMatch) {
       return normalizedLocation;
     }
@@ -4539,7 +4543,7 @@ class SkylightCalendarCard extends HTMLElement {
     }
 
     const endingText = endingMatch[0] || '';
-    const shortened = normalizedLocation
+    const shortened = streetSegment
       .slice(0, endingStart + endingText.length)
       .replace(/[,\s;:\/\\|-]+$/g, '')
       .trim();
