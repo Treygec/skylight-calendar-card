@@ -534,7 +534,15 @@ class SkylightCalendarCard extends HTMLElement {
     this._activeModalBackHandler = null;
     this._combinedEditTargets = null;
     this._combinedDeleteTargets = null;
-    this._pendingHeaderTimeSensorRender = false;
+    this._pendingHeaderSensorRender = false;
+    this._weatherForecastByEntity = new Map();
+    this._weatherForecastSubscriptionEntityId = null;
+    this._weatherForecastUnsubscribe = null;
+    this._weatherForecastSubscriptionInFlight = null;
+    this._weatherForecastSubscriptionInFlightEntityId = null;
+    this._weatherForecastSubscriptionGeneration = 0;
+    this._weatherForecastRefreshInFlight = false;
+    this._weatherForecastRefreshRetryAtByEntity = new Map();
     this._modalVisibilityObserver = null;
     this._handleViewportResize = () => {
       if (this.isEventManagementDialogOpen()) {
@@ -758,6 +766,7 @@ class SkylightCalendarCard extends HTMLElement {
   }
 
   setConfig(config) {
+    const previousHeaderWeatherSensor = this._config?.header_weather_sensor || null;
     if (!config.entities || !Array.isArray(config.entities)) {
       throw new Error('You need to define calendar entities');
     }
@@ -821,6 +830,9 @@ class SkylightCalendarCard extends HTMLElement {
       header_time_sensor: typeof config.header_time_sensor === 'string' && config.header_time_sensor.trim()
         ? config.header_time_sensor.trim()
         : null, // Optional sensor entity that provides a time value shown in header
+      header_weather_sensor: typeof config.header_weather_sensor === 'string' && config.header_weather_sensor.trim()
+        ? config.header_weather_sensor.trim()
+        : null, // Optional weather/sensor entity that provides current conditions + forecast
       hide_event_calendar_bubble: config.hide_event_calendar_bubble || false, // Hide calendar initial bubble on events
       show_event_location: config.show_event_location || false, // Show event location in week and schedule views
       use_short_location: config.use_short_location || false, // Shorten event location text in month/week/schedule/agenda views
@@ -856,7 +868,13 @@ class SkylightCalendarCard extends HTMLElement {
       color_scheme: this.normalizeDefaultDarkMode(config.color_scheme), // Re-apply normalization after spread for color scheme values
       background_opacity: normalizedBackgroundOpacity, // Re-apply normalization after spread for background opacity values
       background_transparent: normalizedBackgroundOpacity >= 100, // Re-apply legacy alias after spread
-      event_title_prefix: normalizedEventTitlePrefix // Re-apply normalization after spread for event title prefix
+      event_title_prefix: normalizedEventTitlePrefix, // Re-apply normalization after spread for event title prefix
+      header_time_sensor: typeof config.header_time_sensor === 'string' && config.header_time_sensor.trim()
+        ? config.header_time_sensor.trim()
+        : null,
+      header_weather_sensor: typeof config.header_weather_sensor === 'string' && config.header_weather_sensor.trim()
+        ? config.header_weather_sensor.trim()
+        : null
     };
     this._viewMode = this._config.default_view;
     this.applyThemeMode(this._config.color_scheme);
@@ -867,6 +885,12 @@ class SkylightCalendarCard extends HTMLElement {
     this._loadedEventRange = null;
     this._calendarDataSignatures = {};
     this._lastUnchangedDataRender = null;
+    if (previousHeaderWeatherSensor !== this._config.header_weather_sensor) {
+      this.teardownWeatherForecastSubscription();
+      this._weatherForecastByEntity.clear();
+      this._weatherForecastRefreshRetryAtByEntity.clear();
+    }
+    this.ensureWeatherForecastSubscription();
     this.setWeekStart();
     this.resetAgendaWindowToToday();
     this.render();
@@ -901,18 +925,33 @@ class SkylightCalendarCard extends HTMLElement {
     }
 
     const configuredHeaderTimeSensor = this._config?.header_time_sensor;
-    if (configuredHeaderTimeSensor) {
-      const previousHeaderSensorState = oldHass?.states?.[configuredHeaderTimeSensor]?.state;
-      const nextHeaderSensorState = hass?.states?.[configuredHeaderTimeSensor]?.state;
-      if (previousHeaderSensorState !== nextHeaderSensorState) {
-        if (this.isEventManagementDialogOpen()) {
-          this._pendingHeaderTimeSensorRender = true;
-        } else {
-          shouldRender = true;
-          this._pendingHeaderTimeSensorRender = false;
-        }
+    const configuredHeaderWeatherSensor = this._config?.header_weather_sensor;
+    const previousHeaderTimeSensorState = configuredHeaderTimeSensor
+      ? this.getHeaderEntityRenderSignature(oldHass?.states?.[configuredHeaderTimeSensor])
+      : null;
+    const nextHeaderTimeSensorState = configuredHeaderTimeSensor
+      ? this.getHeaderEntityRenderSignature(hass?.states?.[configuredHeaderTimeSensor])
+      : null;
+    const previousHeaderWeatherSensorState = configuredHeaderWeatherSensor
+      ? this.getHeaderEntityRenderSignature(oldHass?.states?.[configuredHeaderWeatherSensor])
+      : null;
+    const nextHeaderWeatherSensorState = configuredHeaderWeatherSensor
+      ? this.getHeaderEntityRenderSignature(hass?.states?.[configuredHeaderWeatherSensor])
+      : null;
+    const headerSensorChanged = previousHeaderTimeSensorState !== nextHeaderTimeSensorState ||
+      previousHeaderWeatherSensorState !== nextHeaderWeatherSensorState;
+
+    if (headerSensorChanged) {
+      if (this.isEventManagementDialogOpen()) {
+        this._pendingHeaderSensorRender = true;
+      } else {
+        shouldRender = true;
+        this._pendingHeaderSensorRender = false;
       }
     }
+
+    this.ensureWeatherForecastSubscription();
+    this.refreshWeatherForecastData();
 
     if (shouldRender) {
       this.render();
@@ -1478,6 +1517,7 @@ class SkylightCalendarCard extends HTMLElement {
     window.removeEventListener('resize', this._handleViewportResize);
     window.visualViewport?.removeEventListener('resize', this._handleViewportResize);
     this.detachSystemThemeListener();
+    this.teardownWeatherForecastSubscription();
     if (this._modalVisibilityObserver) {
       this._modalVisibilityObserver.disconnect();
       this._modalVisibilityObserver = null;
@@ -1955,6 +1995,14 @@ class SkylightCalendarCard extends HTMLElement {
         white-space: nowrap;
       }
 
+      .header-weather {
+        font-size: 28px;
+        font-weight: 500;
+        opacity: 0.95;
+        line-height: 1;
+        white-space: nowrap;
+      }
+
       .add-event-button {
         background: var(--header-control-bg, rgba(255, 255, 255, 0.2));
         border: none;
@@ -2200,6 +2248,34 @@ class SkylightCalendarCard extends HTMLElement {
         margin-bottom: 4px;
       }
 
+      .day-header-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 6px;
+        margin-bottom: 4px;
+        min-height: 42px;
+      }
+
+      .day-header-row .day-number {
+        margin-bottom: 0;
+      }
+
+      .month-day-forecast {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .month-day-forecast .forecast-condition {
+        font-size: 14px;
+      }
+
+      .month-day-forecast .forecast-temperatures {
+        font-size: 12px;
+        gap: 2px;
+      }
+
       .day-cell.today .day-number {
         background: #3b82f6;
         color: white;
@@ -2282,6 +2358,51 @@ class SkylightCalendarCard extends HTMLElement {
         margin-bottom: 12px;
         padding-bottom: 12px;
         border-bottom: 2px solid #e5e7eb;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .week-day-header-main {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 100%;
+      }
+
+      .week-day-meta-row {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        margin-top: 2px;
+      }
+
+      .week-day-forecast,
+      .week-standard-day-forecast {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        margin-top: 0;
+        line-height: 1;
+      }
+
+      .forecast-condition {
+        font-size: 16px;
+      }
+
+      .forecast-temperatures {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 3px;
+        font-size: 14px;
+        color: #374151;
+      }
+
+      .forecast-temp-low {
+        opacity: 0.75;
       }
 
       .week-day-name {
@@ -2296,7 +2417,8 @@ class SkylightCalendarCard extends HTMLElement {
         font-size: 24px;
         font-weight: 700;
         color: #111827;
-        margin-top: 4px;
+        margin-top: 0;
+        line-height: 1;
       }
 
       .week-day-column.today .week-day-header {
@@ -2732,6 +2854,9 @@ class SkylightCalendarCard extends HTMLElement {
         text-align: center;
         border-bottom: 1px solid #e5e7eb;
         background: white;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
       }
 
       .week-standard-day-name {
@@ -2746,12 +2871,16 @@ class SkylightCalendarCard extends HTMLElement {
         font-size: 24px;
         font-weight: 700;
         color: #111827;
-        margin-top: 4px;
+        margin-top: 0;
         width: 40px;
         height: 40px;
         display: flex;
         align-items: center;
         justify-content: center;
+        flex: 0 0 auto;
+        line-height: 1;
+        position: relative;
+        z-index: 1;
       }
 
       .week-standard-day-column.today .week-standard-day-date {
@@ -3563,6 +3692,7 @@ class SkylightCalendarCard extends HTMLElement {
       }
 
       .calendar-container.dark-mode .day-number,
+      .calendar-container.dark-mode .forecast-temperatures,
       .calendar-container.dark-mode .month-year,
       .calendar-container.dark-mode .modal-title,
       .calendar-container.dark-mode .confirm-title,
@@ -3706,6 +3836,12 @@ class SkylightCalendarCard extends HTMLElement {
       .calendar-container.custom-background .week-compact-container,
       .calendar-container.custom-background .calendar-badges {
         border-color: rgba(255, 255, 255, 0.35) !important;
+      }
+
+      .calendar-container.custom-background .week-standard-day-column.today .week-standard-day-date {
+        background: #3b82f6 !important;
+        color: #ffffff !important;
+        border-radius: 50%;
       }
 
       .calendar-container.custom-background .calendar-badges-container.has-overflow::after,
@@ -3930,10 +4066,12 @@ class SkylightCalendarCard extends HTMLElement {
 
   renderHeaderTitle() {
     const headerTime = this.getFormattedHeaderSensorTime();
+    const headerWeather = this.getFormattedHeaderWeather();
     return `
       <div class="header-title-wrap">
         <h2 class="header-title">${this.escapeHtml(this._config.title || '')}</h2>
         ${headerTime ? `<span class="header-time">${this.escapeHtml(headerTime)}</span>` : ''}
+        ${headerWeather ? `<span class="header-weather">${this.escapeHtml(headerWeather)}</span>` : ''}
       </div>
     `;
   }
@@ -4083,8 +4221,13 @@ class SkylightCalendarCard extends HTMLElement {
           return `
             <div class="week-day-column ${isToday ? 'today' : ''}" data-date="${date.toISOString()}" data-click-target="day-header">
               <div class="week-day-header">
-                <div class="week-day-name">${dayNames[date.getDay()]}</div>
-                <div class="week-day-date">${date.getDate()}</div>
+                <div class="week-day-header-main">
+                  <div class="week-day-name">${dayNames[date.getDay()]}</div>
+                  <div class="week-day-meta-row">
+                    <div class="week-day-date">${date.getDate()}</div>
+                    ${this.renderDayForecast(date, 'week-compact')}
+                  </div>
+                </div>
               </div>
               <div class="week-day-events">
                 ${events.map(event => {
@@ -4160,8 +4303,13 @@ class SkylightCalendarCard extends HTMLElement {
           return `
             <div class="week-standard-day-column ${isToday ? 'today' : ''}" data-date="${date.toISOString()}">
               <div class="week-standard-day-header" data-click-target="day-header">
-                <div class="week-standard-day-name">${dayNames[date.getDay()]}</div>
-                <div class="week-standard-day-date">${date.getDate()}</div>
+                <div class="week-day-header-main">
+                  <div class="week-standard-day-name">${dayNames[date.getDay()]}</div>
+                  <div class="week-day-meta-row">
+                    <div class="week-standard-day-date">${date.getDate()}</div>
+                    ${this.renderDayForecast(date, 'week-standard')}
+                  </div>
+                </div>
               </div>
               ${hasAllDayEvents ? this.renderAllDayEventsForDay(allDayLanes, allDayHeight) : ''}
               <div class="day-time-slots" style="${dayTimeSlotsStyle}">
@@ -5028,7 +5176,7 @@ class SkylightCalendarCard extends HTMLElement {
     const gridGap = 1;
     const dayHeaderRowHeight = 41;
     const dayCellVerticalPadding = 16; // .day-cell has 8px top + 8px bottom padding
-    const dayNumberBlockHeight = 22; // number text + margin-bottom in compact month cell
+    const dayNumberBlockHeight = 42; // .day-header-row min-height in CSS
     const eventRowHeight = this.getMonthEventRowHeight();
 
     const contentHeight = compactMaxHeight - dayHeaderRowHeight - (weekRows * gridGap);
@@ -5062,7 +5210,10 @@ class SkylightCalendarCard extends HTMLElement {
 
     return `
       <div class="${classes}" data-date="${date.toISOString()}">
-        <div class="day-number">${dayNum}</div>
+        <div class="day-header-row">
+          <div class="day-number">${dayNum}</div>
+          ${this.renderDayForecast(date, 'month')}
+        </div>
         ${dayEvents.slice(0, visibleEvents).map(event => this.renderMonthDayEvent(event, date)).join('')}
         ${hiddenEventCount > 0 ? `<div class="more-events" data-click-target="more-events">${this.t('moreEvents', { count: hiddenEventCount })}</div>` : ''}
       </div>
@@ -5683,8 +5834,8 @@ class SkylightCalendarCard extends HTMLElement {
   }
 
   flushPendingHeaderTimeRender() {
-    if (!this._pendingHeaderTimeSensorRender) return;
-    this._pendingHeaderTimeSensorRender = false;
+    if (!this._pendingHeaderSensorRender) return;
+    this._pendingHeaderSensorRender = false;
     this.render();
   }
 
@@ -7743,6 +7894,140 @@ class SkylightCalendarCard extends HTMLElement {
     return parsed;
   }
 
+  teardownWeatherForecastSubscription() {
+    this._weatherForecastSubscriptionGeneration += 1;
+    if (typeof this._weatherForecastUnsubscribe === 'function') {
+      this._weatherForecastUnsubscribe();
+    }
+    this._weatherForecastUnsubscribe = null;
+    this._weatherForecastSubscriptionEntityId = null;
+    this._weatherForecastSubscriptionInFlight = null;
+    this._weatherForecastSubscriptionInFlightEntityId = null;
+  }
+
+  async ensureWeatherForecastSubscription() {
+    const entityId = this._config?.header_weather_sensor;
+    if (!entityId || !entityId.startsWith('weather.')) {
+      this.teardownWeatherForecastSubscription();
+      return;
+    }
+
+    if (!this._hass?.connection?.subscribeMessage) {
+      return;
+    }
+
+    if (this._weatherForecastSubscriptionEntityId === entityId && this._weatherForecastUnsubscribe) {
+      return;
+    }
+
+    if (this._weatherForecastSubscriptionInFlight && this._weatherForecastSubscriptionInFlightEntityId === entityId) {
+      return this._weatherForecastSubscriptionInFlight;
+    }
+
+    this.teardownWeatherForecastSubscription();
+    const subscriptionGeneration = this._weatherForecastSubscriptionGeneration;
+    this._weatherForecastSubscriptionInFlightEntityId = entityId;
+
+    const setupPromise = this._hass.connection.subscribeMessage(
+        (message) => {
+          const nextForecast = Array.isArray(message?.forecast) ? message.forecast : [];
+          this._weatherForecastByEntity.set(entityId, nextForecast);
+          if (!this.isEventManagementDialogOpen()) {
+            this.render();
+          } else {
+            this._pendingHeaderSensorRender = true;
+          }
+        },
+        {
+          type: 'weather/subscribe_forecast',
+          entity_id: entityId,
+          forecast_type: 'daily'
+        }
+      )
+      .then((unsubscribe) => {
+        const generationMatches = subscriptionGeneration === this._weatherForecastSubscriptionGeneration;
+        const entityMatches = entityId === this._weatherForecastSubscriptionInFlightEntityId;
+        if (!generationMatches || !entityMatches) {
+          if (typeof unsubscribe === 'function') {
+            unsubscribe();
+          }
+          return;
+        }
+
+        this._weatherForecastUnsubscribe = unsubscribe;
+        this._weatherForecastSubscriptionEntityId = entityId;
+      })
+      .catch(() => {
+        if (subscriptionGeneration === this._weatherForecastSubscriptionGeneration) {
+          this._weatherForecastUnsubscribe = null;
+          this._weatherForecastSubscriptionEntityId = null;
+        }
+      })
+      .finally(() => {
+        if (subscriptionGeneration === this._weatherForecastSubscriptionGeneration) {
+          this._weatherForecastSubscriptionInFlight = null;
+          this._weatherForecastSubscriptionInFlightEntityId = null;
+        }
+      });
+
+    this._weatherForecastSubscriptionInFlight = setupPromise;
+    return setupPromise;
+  }
+
+  async refreshWeatherForecastData() {
+    const entityId = this._config?.header_weather_sensor;
+    if (!entityId || !entityId.startsWith('weather.')) return;
+    if (!this._hass || this._weatherForecastRefreshInFlight) return;
+    if (this._weatherForecastByEntity.has(entityId)) return;
+    const now = Date.now();
+    const retryAt = this._weatherForecastRefreshRetryAtByEntity.get(entityId) || 0;
+    if (retryAt > now) return;
+
+    this._weatherForecastRefreshInFlight = true;
+    try {
+      const wsResponse = await this._hass.callWS({
+        type: 'weather/get_forecasts',
+        entity_ids: [entityId],
+        forecast_type: 'daily'
+      });
+
+      const dailyForecast = wsResponse?.[entityId]?.forecast;
+      if (Array.isArray(dailyForecast)) {
+        this._weatherForecastByEntity.set(entityId, dailyForecast);
+        this._weatherForecastRefreshRetryAtByEntity.delete(entityId);
+        if (!this.isEventManagementDialogOpen()) {
+          this.render();
+        } else {
+          this._pendingHeaderSensorRender = true;
+        }
+      }
+    } catch (error) {
+      // forecast websocket may be unavailable in older HA versions; keep graceful fallback paths
+      const retryDelayMs = 5 * 60 * 1000;
+      this._weatherForecastRefreshRetryAtByEntity.set(entityId, now + retryDelayMs);
+    } finally {
+      this._weatherForecastRefreshInFlight = false;
+    }
+  }
+
+  getHeaderEntityRenderSignature(entityState) {
+    if (!entityState) return '';
+    const attrs = entityState.attributes || {};
+    return JSON.stringify({
+      state: entityState.state,
+      temperature: attrs.temperature ?? attrs.current_temperature ?? attrs.temp ?? null,
+      condition: attrs.condition ?? null,
+      forecast: Array.isArray(attrs.forecast)
+        ? attrs.forecast.map((forecastItem) => ({
+          datetime: forecastItem?.datetime ?? forecastItem?.date ?? null,
+          condition: forecastItem?.condition ?? null,
+          high: forecastItem?.temperature ?? forecastItem?.temphigh ?? forecastItem?.high ?? null,
+          low: forecastItem?.templow ?? forecastItem?.low ?? forecastItem?.temperature_low ?? null
+        }))
+        : null
+    });
+  }
+
   getFormattedHeaderSensorTime() {
     const sensorEntityId = this._config?.header_time_sensor;
     if (!sensorEntityId) return '';
@@ -7750,6 +8035,111 @@ class SkylightCalendarCard extends HTMLElement {
     const parsed = this.parseTimeValue(sensorState);
     if (!parsed) return '';
     return this.formatTime(parsed);
+  }
+
+  normalizeWeatherTemperature(value) {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return null;
+    return `${Math.round(numericValue)}°`;
+  }
+
+  mapWeatherConditionToSymbol(conditionValue) {
+    const condition = String(conditionValue || '').trim().toLowerCase();
+    if (!condition || condition === 'unknown' || condition === 'unavailable') return '';
+
+    const symbolMap = {
+      sunny: '☀️',
+      clear: '☀️',
+      clear_night: '🌙',
+      partlycloudy: '⛅',
+      cloudy: '☁️',
+      overcast: '☁️',
+      rainy: '🌧️',
+      pouring: '🌧️',
+      snow: '❄️',
+      snowy: '❄️',
+      snowy_rainy: '🌨️',
+      hail: '🌨️',
+      lightning: '⛈️',
+      lightning_rainy: '⛈️',
+      windy: '💨',
+      windy_variant: '💨',
+      fog: '🌫️'
+    };
+
+    return symbolMap[condition] || '';
+  }
+
+  getHeaderWeatherData() {
+    const sensorEntityId = this._config?.header_weather_sensor;
+    if (!sensorEntityId) return null;
+    const weatherEntity = this._hass?.states?.[sensorEntityId];
+    if (!weatherEntity) return null;
+
+    const attrs = weatherEntity.attributes || {};
+    const condition = attrs.condition || weatherEntity.state;
+    const conditionSymbol = this.mapWeatherConditionToSymbol(condition);
+    const temperature = this.normalizeWeatherTemperature(
+      attrs.temperature ?? attrs.current_temperature ?? attrs.temp ?? weatherEntity.state
+    );
+
+    if (!conditionSymbol || !temperature) return null;
+    return { conditionSymbol, temperature };
+  }
+
+  getFormattedHeaderWeather() {
+    const weatherData = this.getHeaderWeatherData();
+    if (!weatherData) return '';
+    return `${weatherData.conditionSymbol} ${weatherData.temperature}`;
+  }
+
+  getForecastForDate(date) {
+    const sensorEntityId = this._config?.header_weather_sensor;
+    if (!sensorEntityId) return null;
+    const weatherEntity = this._hass?.states?.[sensorEntityId];
+    const wsForecast = this._weatherForecastByEntity.get(sensorEntityId);
+    const forecasts = Array.isArray(wsForecast) && wsForecast.length > 0
+      ? wsForecast
+      : weatherEntity?.attributes?.forecast;
+    if (!Array.isArray(forecasts) || forecasts.length === 0) return null;
+
+    const targetDateKey = this.getDateKey(date);
+    const match = forecasts.find((item) => {
+      const forecastDateValue = item?.datetime || item?.date;
+      if (!forecastDateValue) return false;
+      const forecastDate = new Date(forecastDateValue);
+      if (Number.isNaN(forecastDate.getTime())) return false;
+      return this.getDateKey(forecastDate) === targetDateKey;
+    });
+
+    if (!match) return null;
+
+    const highTemp = this.normalizeWeatherTemperature(match.temperature ?? match.temphigh ?? match.high);
+    const lowTemp = this.normalizeWeatherTemperature(match.templow ?? match.low ?? match.temperature_low);
+    const conditionSymbol = this.mapWeatherConditionToSymbol(match.condition);
+
+    if (!conditionSymbol || !highTemp) return null;
+    return { conditionSymbol, highTemp, lowTemp };
+  }
+
+  renderDayForecast(date, viewMode = 'week-compact') {
+    const forecast = this.getForecastForDate(date);
+    if (!forecast) return '';
+    const forecastClass = viewMode === 'week-standard'
+      ? 'week-standard-day-forecast'
+      : viewMode === 'month'
+        ? 'month-day-forecast'
+        : 'week-day-forecast';
+
+    return `
+      <div class="${forecastClass}">
+        <span class="forecast-condition">${this.escapeHtml(forecast.conditionSymbol)}</span>
+        <span class="forecast-temperatures">
+          <span class="forecast-temp-high">${this.escapeHtml(forecast.highTemp)}</span>
+          ${forecast.lowTemp ? `<span class="forecast-temp-low">${this.escapeHtml(forecast.lowTemp)}</span>` : ''}
+        </span>
+      </div>
+    `;
   }
 
   formatDate(date) {
@@ -7866,6 +8256,7 @@ class SkylightCalendarCard extends HTMLElement {
       hide_year: false,
       hide_controls: false,
       hide_dark_mode_toggle: false,
+      header_weather_sensor: '',
       color_scheme: 'auto',
       enable_event_management: true
     };
@@ -8640,6 +9031,12 @@ class SkylightCalendarCardEditor extends HTMLElement {
           <input id="header_time_sensor" data-field="header_time_sensor" type="text" value="${this._config.header_time_sensor || ''}" placeholder="sensor.current_time">
         </div>
       </div>
+      <div class="field-row">
+        <div class="field field-inline">
+          <label for="header_weather_sensor">Header weather sensor</label>
+          <input id="header_weather_sensor" data-field="header_weather_sensor" type="text" value="${this._config.header_weather_sensor || ''}" placeholder="weather.home">
+        </div>
+      </div>
       <div class="field field-inline">
         <label for="preference_storage_key">Preference storage key</label>
         <input id="preference_storage_key" data-field="preference_storage_key" type="text" value="${this._config.preference_storage_key || ''}" placeholder="Optional custom key">
@@ -9177,7 +9574,7 @@ class SkylightCalendarCardEditor extends HTMLElement {
       checkbox.checked = this.getListFieldValue(listField).includes(checkbox.value);
     });
 
-    this.querySelectorAll('input[data-type="number"], input[data-type="nullable-number"], input[data-type="list"], input[data-field="language"], input[data-field="locale"], input[data-field="header_time_sensor"], input[data-field="preference_storage_key"], input[data-field="background_image_url"], input[data-field="background_image_size"], input[data-field="background_image_position"], input[data-field="background_image_repeat"]').forEach((input) => {
+    this.querySelectorAll('input[data-type="number"], input[data-type="nullable-number"], input[data-type="list"], input[data-field="language"], input[data-field="locale"], input[data-field="header_time_sensor"], input[data-field="header_weather_sensor"], input[data-field="preference_storage_key"], input[data-field="background_image_url"], input[data-field="background_image_size"], input[data-field="background_image_position"], input[data-field="background_image_repeat"]').forEach((input) => {
       if (document.activeElement === input) return;
       const field = input.dataset.field;
       const type = input.dataset.type;
