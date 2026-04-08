@@ -538,6 +538,9 @@ class SkylightCalendarCard extends HTMLElement {
     this._weatherForecastByEntity = new Map();
     this._weatherForecastSubscriptionEntityId = null;
     this._weatherForecastUnsubscribe = null;
+    this._weatherForecastSubscriptionInFlight = null;
+    this._weatherForecastSubscriptionInFlightEntityId = null;
+    this._weatherForecastSubscriptionGeneration = 0;
     this._weatherForecastRefreshInFlight = false;
     this._modalVisibilityObserver = null;
     this._handleViewportResize = () => {
@@ -7890,11 +7893,14 @@ class SkylightCalendarCard extends HTMLElement {
   }
 
   teardownWeatherForecastSubscription() {
+    this._weatherForecastSubscriptionGeneration += 1;
     if (typeof this._weatherForecastUnsubscribe === 'function') {
       this._weatherForecastUnsubscribe();
     }
     this._weatherForecastUnsubscribe = null;
     this._weatherForecastSubscriptionEntityId = null;
+    this._weatherForecastSubscriptionInFlight = null;
+    this._weatherForecastSubscriptionInFlightEntityId = null;
   }
 
   async ensureWeatherForecastSubscription() {
@@ -7912,10 +7918,15 @@ class SkylightCalendarCard extends HTMLElement {
       return;
     }
 
-    this.teardownWeatherForecastSubscription();
+    if (this._weatherForecastSubscriptionInFlight && this._weatherForecastSubscriptionInFlightEntityId === entityId) {
+      return this._weatherForecastSubscriptionInFlight;
+    }
 
-    try {
-      const unsubscribe = await this._hass.connection.subscribeMessage(
+    this.teardownWeatherForecastSubscription();
+    const subscriptionGeneration = this._weatherForecastSubscriptionGeneration;
+    this._weatherForecastSubscriptionInFlightEntityId = entityId;
+
+    const setupPromise = this._hass.connection.subscribeMessage(
         (message) => {
           const nextForecast = Array.isArray(message?.forecast) ? message.forecast : [];
           this._weatherForecastByEntity.set(entityId, nextForecast);
@@ -7930,14 +7941,35 @@ class SkylightCalendarCard extends HTMLElement {
           entity_id: entityId,
           forecast_type: 'daily'
         }
-      );
+      )
+      .then((unsubscribe) => {
+        const generationMatches = subscriptionGeneration === this._weatherForecastSubscriptionGeneration;
+        const entityMatches = entityId === this._weatherForecastSubscriptionInFlightEntityId;
+        if (!generationMatches || !entityMatches) {
+          if (typeof unsubscribe === 'function') {
+            unsubscribe();
+          }
+          return;
+        }
 
-      this._weatherForecastUnsubscribe = unsubscribe;
-      this._weatherForecastSubscriptionEntityId = entityId;
-    } catch (error) {
-      this._weatherForecastUnsubscribe = null;
-      this._weatherForecastSubscriptionEntityId = null;
-    }
+        this._weatherForecastUnsubscribe = unsubscribe;
+        this._weatherForecastSubscriptionEntityId = entityId;
+      })
+      .catch(() => {
+        if (subscriptionGeneration === this._weatherForecastSubscriptionGeneration) {
+          this._weatherForecastUnsubscribe = null;
+          this._weatherForecastSubscriptionEntityId = null;
+        }
+      })
+      .finally(() => {
+        if (subscriptionGeneration === this._weatherForecastSubscriptionGeneration) {
+          this._weatherForecastSubscriptionInFlight = null;
+          this._weatherForecastSubscriptionInFlightEntityId = null;
+        }
+      });
+
+    this._weatherForecastSubscriptionInFlight = setupPromise;
+    return setupPromise;
   }
 
   async refreshWeatherForecastData() {
