@@ -814,6 +814,7 @@ class SkylightCalendarCard extends HTMLElement {
       rolling_weeks: config.rolling_weeks || null, // If set, show current week + N weeks in month view
       show_all_events_month: config.show_all_events_month || false, // In month view, show all events and allow week rows to grow while keeping row minimum height
       show_all_details_month: config.show_all_details_month || false, // In month view, render all events with week-compact styling (also implies show_all_events_month behavior)
+      hide_the_past: config.hide_the_past || false, // Hide events that ended before the current time
       disable_swipe_controls: config.disable_swipe_controls ?? false, // Disable left/right swipe period navigation
       week_start_hour: normalizedWeekStartHour, // Start hour for week-standard view
       week_end_hour: normalizedWeekEndHour, // End hour for week-standard view
@@ -2120,6 +2121,15 @@ class SkylightCalendarCard extends HTMLElement {
 
       .nav-button:hover {
         background: var(--header-control-bg-hover, rgba(255, 255, 255, 0.3));
+      }
+
+      .nav-button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .nav-button:disabled:hover {
+        background: var(--header-control-bg, rgba(255, 255, 255, 0.2));
       }
 
       .today-button {
@@ -3995,7 +4005,7 @@ class SkylightCalendarCard extends HTMLElement {
             ${canAddEvents ? `<button class="add-event-button" id="add-event-btn"><span class="icon">+</span>${this.t('addEvent')}</button>` : ''}
             ${this.renderThemeToggle()}
             <div class="period-controls">
-              <button class="nav-button" id="prev-period">‹</button>
+              <button class="nav-button" id="prev-period" ${this.shouldDisablePreviousNavigation() ? 'disabled' : ''}>‹</button>
               <div class="month-year">${this.getPeriodLabel()}</div>
               <button class="nav-button" id="next-period">›</button>
               <button class="today-button" id="today">${this.t('today')}</button>
@@ -4022,7 +4032,7 @@ class SkylightCalendarCard extends HTMLElement {
         ${shouldShowControls ? `
           <div class="header-controls compact-header-controls">
             <div class="compact-period-controls">
-              <button class="nav-button" id="prev-period">‹</button>
+              <button class="nav-button" id="prev-period" ${this.shouldDisablePreviousNavigation() ? 'disabled' : ''}>‹</button>
               <div class="month-year">${this.getPeriodLabel()}</div>
               <button class="nav-button" id="next-period">›</button>
               <button class="today-button" id="today">${this.t('today')}</button>
@@ -5615,8 +5625,29 @@ class SkylightCalendarCard extends HTMLElement {
         return false;
       }
 
+      if (this._config.hide_the_past) {
+        const { eventEnd } = this.getEventDateTimeInfo(event);
+        if (eventEnd < new Date()) {
+          return false;
+        }
+      }
+
       return this.getEventDaySegment(event, date) !== null;
     });
+  }
+
+  isCurrentDayInViewableRange() {
+    const { startDate, endDate } = this.getVisibleDateRange();
+    const now = new Date();
+    return now >= startDate && now <= endDate;
+  }
+
+  shouldDisablePreviousNavigation() {
+    return !!this._config.hide_the_past && this.isCurrentDayInViewableRange();
+  }
+
+  canNavigateToPreviousPeriod() {
+    return !this.shouldDisablePreviousNavigation();
   }
 
   attachEventListeners() {
@@ -5692,21 +5723,22 @@ class SkylightCalendarCard extends HTMLElement {
       const threshold = 80;
       const nearBottom = agendaContainer.scrollTop + agendaContainer.clientHeight >= agendaContainer.scrollHeight - threshold;
       const nearTop = agendaContainer.scrollTop <= threshold;
+      const canLoadPastAgendaDays = this.canNavigateToPreviousPeriod();
 
-      if (!nearBottom && !nearTop) return;
+      if (!nearBottom && !(nearTop && canLoadPastAgendaDays)) return;
 
       this._agendaScrollLoadLock = true;
       const previousScrollHeight = agendaContainer.scrollHeight;
 
       if (nearBottom) {
         this._agendaEndDate.setDate(this._agendaEndDate.getDate() + this._agendaDaysPerScrollLoad);
-      } else if (nearTop) {
+      } else if (nearTop && canLoadPastAgendaDays) {
         this._agendaStartDate.setDate(this._agendaStartDate.getDate() - this._agendaDaysPerScrollLoad);
       }
 
       await this.ensureEventsForCurrentRange({ renderIfCovered: true });
 
-      if (nearTop) {
+      if (nearTop && canLoadPastAgendaDays) {
         const updatedContainer = this.getRootElementById('agenda-container');
         if (updatedContainer) {
           updatedContainer.scrollTop = updatedContainer.scrollHeight - previousScrollHeight + threshold;
@@ -5840,6 +5872,10 @@ class SkylightCalendarCard extends HTMLElement {
   }
 
   navigateToPreviousPeriod() {
+    if (!this.canNavigateToPreviousPeriod()) {
+      return;
+    }
+
     if (this._viewMode === 'agenda') {
       this.ensureAgendaWindowInitialized();
       const backwardDays = this.getAgendaViewportDayCapacity();
@@ -5980,7 +6016,7 @@ class SkylightCalendarCard extends HTMLElement {
         if (this.canTriggerSwipePeriodNavigation(deltaX)) {
           if (deltaX < 0) {
             this.navigateToNextPeriod();
-          } else {
+          } else if (this.canNavigateToPreviousPeriod()) {
             this.navigateToPreviousPeriod();
           }
         }
@@ -8239,6 +8275,7 @@ class SkylightCalendarCard extends HTMLElement {
       week_start_hour: 0,
       week_end_hour: 23,
       lock_schedule_hours: false,
+      hide_the_past: false,
       disable_swipe_controls: false,
       show_all_events_month: false,
       show_all_details_month: false,
@@ -8436,6 +8473,7 @@ class SkylightCalendarCardEditor extends HTMLElement {
       week_start_hour: 0,
       week_end_hour: 23,
       lock_schedule_hours: false,
+      hide_the_past: false,
       height_scale: 1,
       event_font_size: 11,
       event_time_font_size: 9,
@@ -8815,6 +8853,7 @@ class SkylightCalendarCardEditor extends HTMLElement {
       </div>
       <div class="boolean-list">
         <label><input type="checkbox" data-field="lock_schedule_hours" ${this._config.lock_schedule_hours ? 'checked' : ''}> Schedule view: lock week start/end hours</label>
+        <label><input type="checkbox" data-field="hide_the_past" ${this._config.hide_the_past ? 'checked' : ''}> Hide events in the past</label>
         <label><input type="checkbox" data-field="disable_swipe_controls" ${this._config.disable_swipe_controls ? 'checked' : ''}> Disable swipe period controls</label>
       </div>
       <div class="field-row">
