@@ -1424,8 +1424,19 @@ class SkylightCalendarCard extends HTMLElement {
     if (!rule || rule.condition !== 'has_event' || !rule.calendar) return null;
 
     return dayEvents.find((event) => {
-      const calendarName = this.getCalendarName(event.entityId);
-      const matchesCalendar = this.matchTextCondition(event.entityId, rule.calendar) || this.matchTextCondition(calendarName, rule.calendar);
+      const calendarEntityIds = [event.entityId];
+
+      if (Array.isArray(event.sourceEntityIds)) {
+        calendarEntityIds.push(...event.sourceEntityIds);
+      } else if (Array.isArray(event.sourceCalendars)) {
+        calendarEntityIds.push(...event.sourceCalendars.map((calendar) => calendar.entityId));
+      }
+
+      const uniqueEntityIds = [...new Set(calendarEntityIds.filter((entityId) => !!entityId))];
+      const matchesCalendar = uniqueEntityIds.some((entityId) => {
+        const calendarName = this.getCalendarName(entityId);
+        return this.matchTextCondition(entityId, rule.calendar) || this.matchTextCondition(calendarName, rule.calendar);
+      });
       if (!matchesCalendar) return false;
 
       if (rule.title_match !== undefined) {
