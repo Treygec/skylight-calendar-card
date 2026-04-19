@@ -2717,13 +2717,6 @@ class SkylightCalendarCard extends HTMLElement {
         background: #eff6ff;
       }
 
-      .day-cell.day-style-rule,
-      .week-day-column.day-style-rule,
-      .week-standard-day-column.day-style-rule,
-      .agenda-day-row.day-style-rule {
-        opacity: var(--day-conditional-opacity, 1);
-      }
-
       .day-cell.day-style-has-background,
       .week-day-column.day-style-has-background,
       .week-standard-day-column.day-style-has-background,
