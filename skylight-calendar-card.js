@@ -637,6 +637,8 @@ class SkylightCalendarCard extends HTMLElement {
     this._agendaVisibleEndDate = null;
     this._agendaDaysPerScrollLoad = 7;
     this._agendaScrollLoadLock = false;
+    this._agendaSuppressScrollHandling = false;
+    this._agendaPendingScrollTop = null;
     this._swipeStartX = null;
     this._swipeStartY = null;
     this._swipeTracking = false;
@@ -1114,7 +1116,7 @@ class SkylightCalendarCard extends HTMLElement {
     this.refreshWeatherForecastData();
 
     if (shouldRender) {
-      this.render();
+      this.renderPreservingAgendaScroll();
     }
 
     // Refresh only when stale or when current view needs dates outside loaded range.
@@ -1833,7 +1835,7 @@ class SkylightCalendarCard extends HTMLElement {
       .join('|');
   }
 
-  async updateEvents() {
+  async updateEvents({ preserveScroll = false } = {}) {
     if (!this._hass || this._fetching) return;
 
     const { startDate, endDate } = this.getEventFetchRange();
@@ -1862,7 +1864,11 @@ class SkylightCalendarCard extends HTMLElement {
 
         if (shouldRenderForUnchangedData) {
           this._lastUnchangedDataRender = now;
-          this.render();
+          if (preserveScroll) {
+            this.renderPreservingAgendaScroll();
+          } else {
+            this.render();
+          }
         }
 
         return;
@@ -1879,13 +1885,17 @@ class SkylightCalendarCard extends HTMLElement {
       this._events = this.limitEvents(mergedEvents);
       this._loadedEventRange = { startDate, endDate };
       this._lastUnchangedDataRender = Date.now();
-      this.render();
+      if (preserveScroll) {
+        this.renderPreservingAgendaScroll();
+      } else {
+        this.render();
+      }
     } finally {
       this._fetching = false;
     }
   }
 
-  async extendEventsForRange(startDate, endDate) {
+  async extendEventsForRange(startDate, endDate, { render = true } = {}) {
     if (!this._hass || this._fetching) return;
 
     this._fetching = true;
@@ -1894,7 +1904,9 @@ class SkylightCalendarCard extends HTMLElement {
     try {
       const additionalEvents = await this.fetchEventsInRange(startDate, endDate);
       this._events = this.mergeEvents(this._events, additionalEvents);
-      this.render();
+      if (render) {
+        this.render();
+      }
     } finally {
       this._fetching = false;
     }
@@ -1918,7 +1930,8 @@ class SkylightCalendarCard extends HTMLElement {
     }
 
     if (force || shouldRefreshForAge || !this._loadedEventRange) {
-      await this.updateEvents();
+      const shouldPreserveScrollDuringRefresh = this._viewMode === 'agenda' && !force && !renderIfCovered;
+      await this.updateEvents({ preserveScroll: shouldPreserveScrollDuringRefresh });
       return;
     }
 
@@ -1951,7 +1964,7 @@ class SkylightCalendarCard extends HTMLElement {
     }
 
     for (const range of missingRanges) {
-      await this.extendEventsForRange(range.startDate, range.endDate);
+      await this.extendEventsForRange(range.startDate, range.endDate, { render: false });
     }
 
     this._loadedEventRange = {
@@ -2139,6 +2152,29 @@ class SkylightCalendarCard extends HTMLElement {
     if (!resolvedMaxHeight) return '';
 
     return `max-height: ${resolvedMaxHeight}px; overflow-y: auto;`;
+  }
+
+  preserveAgendaScrollForNextRender() {
+    if (this._viewMode !== 'agenda' || Number.isFinite(this._agendaPendingScrollTop)) return;
+    const agendaContainer = this.getRootElementById('agenda-container');
+    if (!agendaContainer) return;
+    this._agendaPendingScrollTop = agendaContainer.scrollTop;
+  }
+
+  renderPreservingAgendaScroll() {
+    this.preserveAgendaScrollForNextRender();
+    this.render();
+  }
+
+  setAgendaScrollTopWithoutTriggeringLoad(container, scrollTop) {
+    if (!container) return;
+
+    this._agendaSuppressScrollHandling = true;
+    container.scrollTop = scrollTop;
+
+    window.requestAnimationFrame(() => {
+      this._agendaSuppressScrollHandling = false;
+    });
   }
 
   updateWeekStandardFixedOffsetHeightFromDom() {
@@ -4738,6 +4774,8 @@ class SkylightCalendarCard extends HTMLElement {
   }
 
   render() {
+    const shouldRestoreAgendaScrollPosition = this._viewMode === 'agenda' && Number.isFinite(this._agendaPendingScrollTop);
+    const agendaScrollTopToRestore = shouldRestoreAgendaScrollPosition ? this._agendaPendingScrollTop : null;
     const today = new Date();
     const year = this._currentDate.getFullYear();
     const month = this._currentDate.getMonth();
@@ -4840,6 +4878,15 @@ class SkylightCalendarCard extends HTMLElement {
     this.updateWeekStandardFixedOffsetHeightFromDom();
     this.updateMonthContainerTopInViewportFromDom();
     this.updateAgendaContainerTopInViewportFromDom();
+
+    if (shouldRestoreAgendaScrollPosition) {
+      window.requestAnimationFrame(() => {
+        const agendaContainer = this.getRootElementById('agenda-container');
+        this.setAgendaScrollTopWithoutTriggeringLoad(agendaContainer, agendaScrollTopToRestore);
+      });
+    }
+    this._agendaPendingScrollTop = null;
+
     if (this._viewMode === 'agenda') {
       window.requestAnimationFrame(() => {
         this.updateAgendaVisibleDateRangeFromDom();
@@ -6767,7 +6814,7 @@ class SkylightCalendarCard extends HTMLElement {
           this._hiddenCalendars.add(entityId);
         }
         this.persistPreferences();
-        this.render();
+        this.renderPreservingAgendaScroll();
       });
     });
 
@@ -6800,7 +6847,7 @@ class SkylightCalendarCard extends HTMLElement {
     });
 
     agendaContainer?.addEventListener('scroll', async () => {
-      if (this._viewMode !== 'agenda' || this._agendaScrollLoadLock) return;
+      if (this._viewMode !== 'agenda' || this._agendaScrollLoadLock || this._agendaSuppressScrollHandling) return;
       this.updateAgendaVisibleDateRangeFromDom();
       const threshold = 80;
       const nearBottom = agendaContainer.scrollTop + agendaContainer.clientHeight >= agendaContainer.scrollHeight - threshold;
@@ -6813,8 +6860,10 @@ class SkylightCalendarCard extends HTMLElement {
       const previousScrollHeight = agendaContainer.scrollHeight;
 
       if (nearBottom) {
+        this._agendaPendingScrollTop = agendaContainer.scrollTop;
         this._agendaEndDate.setDate(this._agendaEndDate.getDate() + this._agendaDaysPerScrollLoad);
       } else if (nearTop && canLoadPastAgendaDays) {
+        this._agendaPendingScrollTop = null;
         this._agendaStartDate.setDate(this._agendaStartDate.getDate() - this._agendaDaysPerScrollLoad);
       }
 
@@ -6823,7 +6872,10 @@ class SkylightCalendarCard extends HTMLElement {
       if (nearTop && canLoadPastAgendaDays) {
         const updatedContainer = this.getRootElementById('agenda-container');
         if (updatedContainer) {
-          updatedContainer.scrollTop = updatedContainer.scrollHeight - previousScrollHeight + threshold;
+          this.setAgendaScrollTopWithoutTriggeringLoad(
+            updatedContainer,
+            updatedContainer.scrollHeight - previousScrollHeight + threshold
+          );
         }
       }
 
@@ -6950,7 +7002,7 @@ class SkylightCalendarCard extends HTMLElement {
   flushPendingHeaderTimeRender() {
     if (!this._pendingHeaderSensorRender) return;
     this._pendingHeaderSensorRender = false;
-    this.render();
+    this.renderPreservingAgendaScroll();
   }
 
   navigateToPreviousPeriod() {
@@ -9066,7 +9118,7 @@ class SkylightCalendarCard extends HTMLElement {
           const nextForecast = Array.isArray(message?.forecast) ? message.forecast : [];
           this._weatherForecastByEntity.set(entityId, nextForecast);
           if (!this.isEventManagementDialogOpen()) {
-            this.render();
+            this.renderPreservingAgendaScroll();
           } else {
             this._pendingHeaderSensorRender = true;
           }
@@ -9129,7 +9181,7 @@ class SkylightCalendarCard extends HTMLElement {
         this._weatherForecastByEntity.set(entityId, dailyForecast);
         this._weatherForecastRefreshRetryAtByEntity.delete(entityId);
         if (!this.isEventManagementDialogOpen()) {
-          this.render();
+          this.renderPreservingAgendaScroll();
         } else {
           this._pendingHeaderSensorRender = true;
         }
