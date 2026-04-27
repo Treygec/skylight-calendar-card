@@ -637,6 +637,7 @@ class SkylightCalendarCard extends HTMLElement {
     this._agendaVisibleEndDate = null;
     this._agendaDaysPerScrollLoad = 7;
     this._agendaScrollLoadLock = false;
+    this._agendaSuppressScrollHandling = false;
     this._agendaPendingScrollTop = null;
     this._swipeStartX = null;
     this._swipeStartY = null;
@@ -2163,6 +2164,17 @@ class SkylightCalendarCard extends HTMLElement {
   renderPreservingAgendaScroll() {
     this.preserveAgendaScrollForNextRender();
     this.render();
+  }
+
+  setAgendaScrollTopWithoutTriggeringLoad(container, scrollTop) {
+    if (!container) return;
+
+    this._agendaSuppressScrollHandling = true;
+    container.scrollTop = scrollTop;
+
+    window.requestAnimationFrame(() => {
+      this._agendaSuppressScrollHandling = false;
+    });
   }
 
   updateWeekStandardFixedOffsetHeightFromDom() {
@@ -4870,9 +4882,7 @@ class SkylightCalendarCard extends HTMLElement {
     if (shouldRestoreAgendaScrollPosition) {
       window.requestAnimationFrame(() => {
         const agendaContainer = this.getRootElementById('agenda-container');
-        if (agendaContainer) {
-          agendaContainer.scrollTop = agendaScrollTopToRestore;
-        }
+        this.setAgendaScrollTopWithoutTriggeringLoad(agendaContainer, agendaScrollTopToRestore);
       });
     }
     this._agendaPendingScrollTop = null;
@@ -6837,7 +6847,7 @@ class SkylightCalendarCard extends HTMLElement {
     });
 
     agendaContainer?.addEventListener('scroll', async () => {
-      if (this._viewMode !== 'agenda' || this._agendaScrollLoadLock) return;
+      if (this._viewMode !== 'agenda' || this._agendaScrollLoadLock || this._agendaSuppressScrollHandling) return;
       this.updateAgendaVisibleDateRangeFromDom();
       const threshold = 80;
       const nearBottom = agendaContainer.scrollTop + agendaContainer.clientHeight >= agendaContainer.scrollHeight - threshold;
@@ -6862,7 +6872,10 @@ class SkylightCalendarCard extends HTMLElement {
       if (nearTop && canLoadPastAgendaDays) {
         const updatedContainer = this.getRootElementById('agenda-container');
         if (updatedContainer) {
-          updatedContainer.scrollTop = updatedContainer.scrollHeight - previousScrollHeight + threshold;
+          this.setAgendaScrollTopWithoutTriggeringLoad(
+            updatedContainer,
+            updatedContainer.scrollHeight - previousScrollHeight + threshold
+          );
         }
       }
 
