@@ -2314,11 +2314,33 @@ class SkylightCalendarCard extends HTMLElement {
 
   updateAgendaVisibleDateRangeFromDom() {
     const visibleRange = this.getAgendaVisibleDateRangeFromDom();
-    if (!visibleRange) return;
+    if (!visibleRange) {
+      this._agendaVisibleStartDate = null;
+      this._agendaVisibleEndDate = null;
+      this.updateAgendaPeriodLabelInDom();
+      return;
+    }
 
     this._agendaVisibleStartDate = visibleRange.startDate;
     this._agendaVisibleEndDate = visibleRange.endDate;
     this.updateAgendaPeriodLabelInDom();
+  }
+
+  isAgendaRangeWithinCurrentWindow(range) {
+    if (!range?.startDate || !range?.endDate || !this._agendaStartDate || !this._agendaEndDate) {
+      return false;
+    }
+
+    const rangeStart = new Date(range.startDate);
+    rangeStart.setHours(0, 0, 0, 0);
+    const rangeEnd = new Date(range.endDate);
+    rangeEnd.setHours(23, 59, 59, 999);
+    const windowStart = new Date(this._agendaStartDate);
+    windowStart.setHours(0, 0, 0, 0);
+    const windowEnd = new Date(this._agendaEndDate);
+    windowEnd.setHours(23, 59, 59, 999);
+
+    return rangeStart >= windowStart && rangeEnd <= windowEnd;
   }
 
   updateAgendaPeriodLabelInDom() {
@@ -7014,12 +7036,14 @@ class SkylightCalendarCard extends HTMLElement {
       this.ensureAgendaWindowInitialized();
       const dayMs = 24 * 60 * 60 * 1000;
       const windowSpanDays = Math.max(0, Math.round((this._agendaEndDate.getTime() - this._agendaStartDate.getTime()) / dayMs));
-      const visibleRange = this.getAgendaVisibleDateRangeFromDom() || (
-        this._agendaVisibleStartDate && this._agendaVisibleEndDate
-          ? { startDate: this._agendaVisibleStartDate, endDate: this._agendaVisibleEndDate }
-          : null
+      const visibleRangeFromDom = this.getAgendaVisibleDateRangeFromDom();
+      const visibleRangeFromCache = this._agendaVisibleStartDate && this._agendaVisibleEndDate
+        ? { startDate: this._agendaVisibleStartDate, endDate: this._agendaVisibleEndDate }
+        : null;
+      const visibleRange = visibleRangeFromDom || (
+        this.isAgendaRangeWithinCurrentWindow(visibleRangeFromCache) ? visibleRangeFromCache : null
       );
-      const targetStart = visibleRange ? new Date(visibleRange.endDate) : new Date(this._agendaStartDate);
+      const targetStart = visibleRange ? new Date(visibleRange.endDate) : new Date(this._agendaEndDate);
       targetStart.setHours(0, 0, 0, 0);
 
       const targetEnd = new Date(targetStart);
