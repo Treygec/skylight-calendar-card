@@ -3433,6 +3433,7 @@ class SkylightCalendarCard extends HTMLElement {
         gap: 0 8px;
         height: auto;
         padding: 8px 64px 8px calc(12px + var(--combine-left-offset, 0px));
+        padding-bottom: calc(8px + (var(--combined-corner-bubbles, 0) * 16px));
       }
 
       .calendar-container.agenda-compact-events .agenda-event-title {
