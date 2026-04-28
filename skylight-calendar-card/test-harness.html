@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Skylight Calendar Card — Local Test Harness</title>
+  <style>
+    /* Define the HA CSS variables the card relies on */
+    :root {
+      --primary-color: #6366f1;
+      --card-background-color: #ffffff;
+    }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #f0f0f0;
+      font-family: sans-serif;
+    }
+
+    body.dark {
+      background: #111827;
+    }
+
+    ha-card {
+      display: block;
+      max-width: 1200px;
+      margin: 0 auto;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.18);
+    }
+
+    .controls {
+      max-width: 1200px;
+      margin: 0 auto 14px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .controls label { font-size: 13px; }
+
+    .controls select,
+    .controls button {
+      font-size: 13px;
+      padding: 5px 12px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      cursor: pointer;
+      background: white;
+    }
+
+    .controls button:hover { background: #f3f4f6; }
+
+    #log {
+      max-width: 1200px;
+      margin: 12px auto 0;
+      background: #1e1e2e;
+      color: #a6e3a1;
+      font-family: monospace;
+      font-size: 12px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      max-height: 160px;
+      overflow-y: auto;
+      display: none;
+    }
+
+    #log.visible { display: block; }
+  </style>
+</head>
+<body>
+
+  <div class="controls">
+    <label>View:
+      <select id="view-picker">
+        <option value="month">Month</option>
+        <option value="week-compact">Week</option>
+        <option value="week-standard">Schedule</option>
+        <option value="agenda">Agenda</option>
+      </select>
+    </label>
+    <label>Task source:
+      <select id="task-source-picker">
+        <option value="none">None</option>
+        <option value="ha_todo" selected>HA Todo (mock)</option>
+        <option value="obsidian">Obsidian (mock fetch fails gracefully)</option>
+      </select>
+    </label>
+    <button onclick="reloadCard()">↺ Reload</button>
+    <button onclick="toggleDark()">☾ Dark mode</button>
+    <button onclick="toggleLog()">📋 Console log</button>
+  </div>
+
+  <ha-card id="card-host"></ha-card>
+  <div id="log"></div>
+
+  <script src="./skylight-calendar-card.js"></script>
+
+  <script>
+    // =========================================================================
+    // INTERCEPT console.log/warn so we can show them in the page log
+    // =========================================================================
+    const logEl = document.getElementById('log');
+    ['log', 'warn', 'error'].forEach(level => {
+      const orig = console[level].bind(console);
+      console[level] = (...args) => {
+        orig(...args);
+        const line = document.createElement('div');
+        line.style.color = level === 'error' ? '#f38ba8' : level === 'warn' ? '#f9e2af' : '#a6e3a1';
+        line.textContent = `[${level}] ${args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 0) : a).join(' ')}`;
+        logEl.appendChild(line);
+        logEl.scrollTop = logEl.scrollHeight;
+      };
+    });
+
+    function toggleLog() { logEl.classList.toggle('visible'); }
+
+    // =========================================================================
+    // MOCK DATA STORE  — mutable so service calls actually take effect
+    // =========================================================================
+
+    const TODAY = new Date();
+    function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
+    function localDateStr(d) {
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+    function pad(n) { return String(n).padStart(2, '0'); }
+
+    // These arrays are mutated in-place by callService so re-fetches see updated data.
+    let mockEvents = [
+      {
+        summary: 'Team Standup',
+        start: { dateTime: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 9, 30).toISOString() },
+        end:   { dateTime: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 10, 0).toISOString() },
+        uid: 'evt-001', description: 'Daily sync'
+      },
+      {
+        summary: 'Dentist',
+        start: { dateTime: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate() + 2, 14, 0).toISOString() },
+        end:   { dateTime: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate() + 2, 15, 0).toISOString() },
+        uid: 'evt-002'
+      },
+      {
+        summary: 'Family Game Night',
+        start: { date: localDateStr(addDays(TODAY, 3)) },
+        end:   { date: localDateStr(addDays(TODAY, 4)) },
+        uid: 'evt-003'
+      },
+      {
+        summary: 'Sprint Planning',
+        start: { dateTime: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate() + 1, 10, 0).toISOString() },
+        end:   { dateTime: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate() + 1, 12, 0).toISOString() },
+        uid: 'evt-004'
+      },
+      {
+        summary: 'Book Club',
+        start: { dateTime: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate() + 5, 18, 0).toISOString() },
+        end:   { dateTime: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate() + 5, 20, 0).toISOString() },
+        uid: 'evt-005'
+      },
+      {
+        summary: 'Deep Work Block',
+        start: { dateTime: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 13, 0).toISOString() },
+        end:   { dateTime: new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate(), 16, 0).toISOString() },
+        uid: 'evt-006'
+      },
+    ];
+
+    let mockTodoItems = [
+      { uid: 't001', summary: 'Write Q2 report',       status: 'needs_action', description: '#Work priority:high' },
+      { uid: 't002', summary: 'Review PR #42',         status: 'needs_action', description: '#Work @dev' },
+      { uid: 't003', summary: 'Buy groceries',         status: 'needs_action', description: '#Personal @errands' },
+      { uid: 't004', summary: 'Schedule dentist',      status: 'needs_action', description: '#Personal @errands priority:medium' },
+      { uid: 't005', summary: 'Read architecture doc', status: 'needs_action', description: '#Work @dev priority:low' },
+      { uid: 't006', summary: 'Update LinkedIn',       status: 'needs_action', description: '#Personal' },
+      { uid: 't007', summary: 'Fix login bug',         status: 'needs_action', description: '#Work @dev priority:high' },
+      { uid: 't008', summary: 'Plan vacation',         status: 'needs_action', description: '#Personal @home' },
+      { uid: 't009', summary: 'Refactor auth module',  status: 'needs_action', description: '#Work @dev' },
+      // Has a due date — should NOT appear in the backlog panel
+      { uid: 't010', summary: 'Submit timesheet',      status: 'needs_action', due: localDateStr(TODAY), description: '#Work' },
+    ];
+
+    // =========================================================================
+    // SERVICE CALL HANDLERS
+    // Each function mutates the store so the next callWS re-fetch reflects it.
+    // =========================================================================
+
+    const serviceHandlers = {
+      // ── calendar.create_event ──────────────────────────────────────────────
+      'calendar.create_event'(data) {
+        const uid = 'evt-new-' + Date.now();
+        const isAllDay = !!data.start_date;
+        mockEvents.push({
+          summary: data.summary,
+          uid,
+          description: data.description || '',
+          start: isAllDay ? { date: data.start_date } : { dateTime: data.dtstart || data.start_date_time },
+          end:   isAllDay ? { date: data.end_date   } : { dateTime: data.dtend   || data.end_date_time   },
+        });
+        console.log(`[mock store] created event "${data.summary}" (${uid})`);
+      },
+
+      // ── calendar.update_event ──────────────────────────────────────────────
+      'calendar.update_event'(data) {
+        const idx = mockEvents.findIndex(e => e.uid === data.uid);
+        if (idx === -1) { console.warn('[mock store] update_event: uid not found', data.uid); return; }
+        const ev = mockEvents[idx];
+
+        // Detect all-day vs timed by the format of dtstart/dtend
+        const isAllDay = data.dtstart && /^\d{4}-\d{2}-\d{2}$/.test(data.dtstart);
+
+        if (isAllDay) {
+          ev.start = { date: data.dtstart };
+          ev.end   = { date: data.dtend };
+          delete ev.start.dateTime;
+          delete ev.end.dateTime;
+        } else if (data.dtstart) {
+          ev.start = { dateTime: new Date(data.dtstart).toISOString() };
+          ev.end   = { dateTime: new Date(data.dtend).toISOString() };
+          delete ev.start.date;
+          delete ev.end.date;
+        }
+
+        if (data.summary)     ev.summary     = data.summary;
+        if (data.description) ev.description = data.description;
+        if (data.location)    ev.location    = data.location;
+
+        console.log(`[mock store] updated event "${ev.summary}" → start: ${data.dtstart}`);
+      },
+
+      // ── calendar.delete_event ──────────────────────────────────────────────
+      'calendar.delete_event'(data) {
+        const before = mockEvents.length;
+        mockEvents = mockEvents.filter(e => e.uid !== data.uid);
+        console.log(`[mock store] deleted event uid=${data.uid} (removed ${before - mockEvents.length})`);
+      },
+
+      // ── todo.add_item ──────────────────────────────────────────────────────
+      'todo.add_item'(data) {
+        const uid = 'task-new-' + Date.now();
+        mockTodoItems.push({
+          uid,
+          summary: data.item,
+          status: 'needs_action',
+          description: data.description || '',
+          due: data.due_date || null,
+        });
+        console.log(`[mock store] added todo "${data.item}" (${uid})`);
+      },
+
+      // ── todo.update_item ───────────────────────────────────────────────────
+      'todo.update_item'(data) {
+        // HA passes item by uid or by name depending on version
+        const item = mockTodoItems.find(t => t.uid === data.item || t.summary === data.item);
+        if (!item) { console.warn('[mock store] update_item: not found', data.item); return; }
+        if (data.due_date !== undefined) item.due = data.due_date;
+        if (data.status   !== undefined) item.status = data.status;
+        if (data.rename   !== undefined) item.summary = data.rename;
+        console.log(`[mock store] updated todo "${item.summary}" due=${item.due}`);
+      },
+
+      // ── todo.remove_item ───────────────────────────────────────────────────
+      'todo.remove_item'(data) {
+        mockTodoItems = mockTodoItems.filter(t => t.uid !== data.item && t.summary !== data.item);
+        console.log(`[mock store] removed todo item="${data.item}"`);
+      },
+    };
+
+    // =========================================================================
+    // MOCK HASS
+    // =========================================================================
+
+    const CAL_FEATURES = 7; // create=1, update=2, delete=4
+
+    function buildMockHass(darkMode = false) {
+      return {
+        language: 'en',
+        locale: { language: 'en-US' },
+        themes: { darkMode },
+
+        states: {
+          'calendar.personal': { entity_id: 'calendar.personal', state: 'on', attributes: { friendly_name: 'Personal', supported_features: CAL_FEATURES } },
+          'calendar.work':     { entity_id: 'calendar.work',     state: 'on', attributes: { friendly_name: 'Work',     supported_features: CAL_FEATURES } },
+          'calendar.family':   { entity_id: 'calendar.family',   state: 'on', attributes: { friendly_name: 'Family',   supported_features: CAL_FEATURES } },
+          'todo.my_tasks':     { entity_id: 'todo.my_tasks',     state: String(mockTodoItems.filter(t => t.status !== 'completed').length), attributes: { friendly_name: 'My Tasks' } },
+        },
+
+        // ----------------------------------------------------------------
+        // callWS — reads from the mutable store so post-mutation re-fetches
+        // return the updated data
+        // ----------------------------------------------------------------
+        callWS(msg) {
+          if (msg.type === 'calendar/events') {
+            // Return a deep copy so the card can't mutate the store directly
+            return Promise.resolve(mockEvents.map(e => JSON.parse(JSON.stringify(e))));
+          }
+          if (msg.type === 'todo/item/list') {
+            return Promise.resolve({ items: mockTodoItems.map(t => ({ ...t })) });
+          }
+          if (msg.type === 'calendar/capabilities') {
+            return Promise.resolve({ create_event: true, delete_event: true, update_event: true });
+          }
+          console.warn('[mock] Unhandled callWS:', msg.type);
+          return Promise.resolve({});
+        },
+
+        // ----------------------------------------------------------------
+        // callService — dispatches to the handler that mutates the store,
+        // then resolves so the card proceeds to re-fetch
+        // ----------------------------------------------------------------
+        callService(domain, service, data) {
+          const key = `${domain}.${service}`;
+          console.log(`[mock] callService: ${key}`, JSON.stringify(data));
+          const handler = serviceHandlers[key];
+          if (handler) {
+            handler(data);
+          } else {
+            console.warn(`[mock] No handler for ${key}`);
+          }
+          return Promise.resolve();
+        },
+
+        // ----------------------------------------------------------------
+        // callApi — REST fallback
+        // ----------------------------------------------------------------
+        callApi(method, path) {
+          console.log(`[mock] callApi: ${method} ${path}`);
+          if (path.startsWith('calendars/')) {
+            return Promise.resolve(mockEvents.map(e => JSON.parse(JSON.stringify(e))));
+          }
+          return Promise.resolve([]);
+        },
+      };
+    }
+
+    // =========================================================================
+    // CARD LIFECYCLE
+    // =========================================================================
+
+    let isDark = false;
+    let activeCard = null;
+
+    function buildConfig() {
+      const view       = document.getElementById('view-picker').value;
+      const taskSource = document.getElementById('task-source-picker').value;
+      return {
+        title: 'My Calendar',
+        entities: ['calendar.personal', 'calendar.work', 'calendar.family'],
+        default_view: view,
+        first_day_of_week: 0,
+        week_days: [0, 1, 2, 3, 4, 5, 6],
+        week_start_hour: 7,
+        week_end_hour: 21,
+        show_current_time_bar: true,
+        enable_event_management: true,
+        colors: {
+          'calendar.personal': '#6366f1',
+          'calendar.work':     '#f59e0b',
+          'calendar.family':   '#10b981',
+        },
+        // New task / meal features
+        task_source:          taskSource,
+        task_entities:        ['todo.my_tasks'],
+        show_task_panel:      true,
+        meal_calendar:        'calendar.family',
+        // Obsidian config (UI-only in harness — actual fetch will fail gracefully)
+        obsidian_api_url:     'http://localhost:27123',
+        obsidian_task_folder: 'Tasks',
+      };
+    }
+
+    function reloadCard() {
+      const host = document.getElementById('card-host');
+      host.innerHTML = '';
+
+      const card = document.createElement('skylight-calendar-card');
+      activeCard = card;
+
+      // Set hass BEFORE setConfig so capabilities are available on first render
+      card._hass = buildMockHass(isDark);         // direct property bypass for pre-seed
+      card.setConfig(buildConfig());               // renders with hass already available
+      card.hass = buildMockHass(isDark);           // official setter — triggers event fetch
+
+      host.appendChild(card);
+    }
+
+    function toggleDark() {
+      isDark = !isDark;
+      document.body.classList.toggle('dark', isDark);
+      reloadCard();
+    }
+
+    document.getElementById('view-picker').addEventListener('change', reloadCard);
+    document.getElementById('task-source-picker').addEventListener('change', reloadCard);
+
+    reloadCard();
+  </script>
+</body>
+</html>
