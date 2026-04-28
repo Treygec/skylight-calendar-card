@@ -1001,7 +1001,9 @@ class SkylightCalendarCard extends HTMLElement {
       day_styles: normalizedDayStyles, // Per-day styling rules
       hide_times_for_calendars: config.hide_times_for_calendars || [], // Hide times in schedule view for specific calendars
       show_current_time_bar: config.show_current_time_bar || false, // Show a "now" indicator in schedule view
-      use_24hr_schedule: config.use_24hr_schedule ?? false, // Use 24-hour time notation in schedule view
+      use_24hr_schedule: Object.prototype.hasOwnProperty.call(config, 'use_24hr_schedule')
+        ? config.use_24hr_schedule
+        : undefined, // If set, force 12/24-hour notation; otherwise defer to locale defaults
       header_color: normalizedHeaderColor !== undefined ? normalizedHeaderColor : 'var(--primary-color)', // Custom header background color/gradient
       header_text_color: normalizedHeaderTextColor, // Optional custom header text color (auto contrast by default)
       header_background_transparent: normalizedHeaderBackgroundOpacity >= 100, // Legacy alias for full header transparency
@@ -6052,12 +6054,22 @@ class SkylightCalendarCard extends HTMLElement {
     return this.formatScheduleTime(date);
   }
 
-  formatScheduleTime(date) {
-    return new Intl.DateTimeFormat(this.getLocale(), {
+  getTimeFormatOptions() {
+    const formatOptions = {
       hour: 'numeric',
-      minute: '2-digit',
-      hour12: !this._config.use_24hr_schedule
-    }).format(date);
+      minute: '2-digit'
+    };
+
+    const config = this._config || {};
+    if (Object.prototype.hasOwnProperty.call(config, 'use_24hr_schedule')) {
+      formatOptions.hour12 = !config.use_24hr_schedule;
+    }
+
+    return formatOptions;
+  }
+
+  formatScheduleTime(date) {
+    return new Intl.DateTimeFormat(this.getLocale(), this.getTimeFormatOptions()).format(date);
   }
 
   getMonthWeekRowCount() {
@@ -9123,7 +9135,7 @@ class SkylightCalendarCard extends HTMLElement {
   }
 
   formatTime(date) {
-    return new Intl.DateTimeFormat(this.getLocale(), { hour: 'numeric', minute: '2-digit' }).format(date);
+    return new Intl.DateTimeFormat(this.getLocale(), this.getTimeFormatOptions()).format(date);
   }
 
   parseTimeValue(value) {
